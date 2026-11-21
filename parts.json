@@ -28,6 +28,7 @@
   },
   "pir_sensor": {
     "_comment": "HC-SR501 PIR Motion Detector Module. Source: HC-SR501 Datasheet / BISS0001 IC Datasheet.",
+    "is_sensor": true,
     "pins": {
       "VCC": {
         "role": "power",
@@ -38,7 +39,7 @@
         "role": "ground"
       },
       "OUT": {
-        "role": "gpio",
+        "role": "output",
         "level": 3.3,
         "max_source_ma": "UNVERIFIED",
         "_comment": "Output: 3.3V TTL High level via onboard 3.3V regulator (Source: HC-SR501 Datasheet). Max source current from BISS0001 is unrated for sustained loads, marked UNVERIFIED."
@@ -47,6 +48,7 @@
   },
   "pir_sensor_5v": {
     "_comment": "5V PIR Motion Sensor (Parallax #555-28027 style). Source: Parallax PIR Sensor Datasheet Rev 1.4.",
+    "is_sensor": true,
     "pins": {
       "VCC": {
         "role": "power",
@@ -57,7 +59,7 @@
         "role": "ground"
       },
       "OUT": {
-        "role": "gpio",
+        "role": "output",
         "level": 5.0,
         "max_source_ma": 23,
         "_comment": "Output: 5.0V logic High when supplied with 5V; max output current 23 mA (Source: Parallax #555-28027 Datasheet Rev 1.4)"

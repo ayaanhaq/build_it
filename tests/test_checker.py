@@ -165,6 +165,48 @@ class CheckerTests(unittest.TestCase):
         self.assertTrue(len(errors) > 0)
         self.assertTrue(any("5.0V sensor output" in e or "3.3V GPIO" in e for e in errors))
 
+    def test_sensor_with_non_matching_name_rejected(self):
+        custom_lib = dict(LIB)
+        custom_lib["motion_det"] = {
+            "is_sensor": True,
+            "pins": {
+                "VCC": {"role": "power", "v": 5.0},
+                "GND": {"role": "ground"},
+                "OUT": {"role": "output", "level": 5.0, "max_source_ma": 20}
+            }
+        }
+        design = {
+            "name": "custom_sensor_test",
+            "parts": {"s1": "motion_det", "pi": "raspberry_pi_4"},
+            "values": {},
+            "nets": {
+                "NET1": ["s1.OUT", "pi.GPIO17"]
+            }
+        }
+        errors = check(design, custom_lib)
+        self.assertTrue(any("5.0V sensor output" in e and "cannot directly drive" in e for e in errors))
+
+    def test_part_with_pir_in_name_but_not_sensor_not_treated_as_sensor(self):
+        custom_lib = dict(LIB)
+        custom_lib["mock_pir"] = {
+            "is_sensor": False,
+            "pins": {
+                "VCC": {"role": "power", "v": 5.0},
+                "GND": {"role": "ground"},
+                "OUT": {"role": "output", "level": 5.0}
+            }
+        }
+        design = {
+            "name": "not_a_sensor_test",
+            "parts": {"chip1": "mock_pir", "pi": "raspberry_pi_4"},
+            "values": {},
+            "nets": {
+                "NET1": ["chip1.OUT", "pi.GPIO17"]
+            }
+        }
+        errors = check(design, custom_lib)
+        self.assertFalse(any("5.0V sensor output" in e for e in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

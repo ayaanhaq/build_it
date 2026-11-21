@@ -90,11 +90,12 @@ def check(netlist, lib):
             v = pinfo.get("v")
 
             # Check for 5V sensor output
-            is_sensor = "sensor" in ctype or "pir" in ctype
-            is_5v_output = (level == 5.0 or v == 5.0) and role in ("gpio", "output")
+            cinfo = lib.get(ctype, {})
+            is_sensor = cinfo.get("is_sensor", False) is True
+            is_5v_output = (level == 5.0 or v == 5.0) and role == "output"
             if is_sensor and is_5v_output:
                 sensor_5v_pins.append(pin_ref)
-            elif role == "gpio" and level == 3.3 and not is_sensor:
+            elif role == "gpio" and level == 3.3:
                 gpio_3v3_pins.append(pin_ref)
 
         if sensor_5v_pins and gpio_3v3_pins:

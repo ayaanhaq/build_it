@@ -75,8 +75,9 @@ Components are defined in `parts.json`.
 
 ### Schema
 Each part entry contains:
+- **`is_sensor`** *(bool, optional)*: Explicit boolean indicating if the part is a sensor module.
 - **`pins`** *(dict)*: Map of pin names to pin definitions.
-  - **`role`** *(string)*: One of `gpio`, `power`, `ground`, `anode`, `cathode`, or `passive`.
+  - **`role`** *(string)*: One of `gpio`, `power`, `ground`, `anode`, `cathode`, `output`, or `passive`.
   - **`level`** *(float, optional)*: Logic voltage level in Volts (e.g., `3.3` or `5.0`).
   - **`v`** *(float, optional)*: Supply rail voltage in Volts (e.g., `5.0`).
   - **`max_source_ma`** *(float or "UNVERIFIED")*: Maximum current the pin can source in mA.
@@ -94,6 +95,7 @@ Each part entry contains:
 ```json
 "my_sensor": {
   "_comment": "Example 3.3V Sensor. Source: Manufacturer Datasheet Rev 1.0.",
+  "is_sensor": true,
   "pins": {
     "VCC": {
       "role": "power",
@@ -104,7 +106,7 @@ Each part entry contains:
       "role": "ground"
     },
     "OUT": {
-      "role": "gpio",
+      "role": "output",
       "level": 3.3,
       "max_source_ma": "UNVERIFIED",
       "_comment": "3.3V digital output. Source drive capability unrated in datasheet, marked UNVERIFIED."
