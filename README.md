@@ -90,6 +90,7 @@ Each part entry contains:
 - **Documentation & Citations**:
   - Always include a `_comment` citing the datasheet source and value for each limit.
   - If a value cannot be verified from a reliable datasheet, set it to `"UNVERIFIED"` rather than guessing.
+  - When a limit like `max_source_ma` is `"UNVERIFIED"`, `checker.py` applies a conservative default placeholder (`DEFAULT_UNVERIFIED_MAX_SOURCE_MA = 8.0` mA) and issues a warning. Warnings do not fail the design unless the calculated current exceeds this conservative limit.
 
 ### Example: Adding a Sensor
 ```json
@@ -173,6 +174,9 @@ Running `python3 main.py --json <netlist>` produces structured output suitable f
 {
   "ok": true,
   "errors": [],
+  "warnings": [
+    "Limit 'max_source_ma' on 'pir.OUT' is UNVERIFIED; using conservative default of 8.0 mA"
+  ],
   "steps": [
     "Connect pi.GND to led1.cathode. Check: multimeter continuity between pi.GND and led1.cathode should beep.",
     "Connect pi.GPIO17 to r1.a. Check: multimeter continuity between pi.GPIO17 and r1.a should beep.",
@@ -189,6 +193,7 @@ Running `python3 main.py --json <netlist>` produces structured output suitable f
   "errors": [
     "5.0V sensor output 'pir.OUT' cannot directly drive 3.3V GPIO pin 'pi.GPIO17' on net 'SENSOR_SIGNAL'"
   ],
+  "warnings": [],
   "steps": []
 }
 ```

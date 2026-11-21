@@ -2,6 +2,15 @@ import json
 from pathlib import Path
 
 
+# Conservative placeholder limit (in mA) when a GPIO or output pin's max_source_ma is UNVERIFIED.
+# Used until a verified datasheet value is confirmed.
+DEFAULT_UNVERIFIED_MAX_SOURCE_MA = 8.0
+
+# Conservative placeholder limit (in mA) when an input pin's max_sink_ma is UNVERIFIED.
+# Used until a verified datasheet value is confirmed.
+DEFAULT_UNVERIFIED_MAX_SINK_MA = 5.0
+
+
 def load_parts(path=None):
     if path is None:
         path = Path(__file__).resolve().parent / "parts.json"
@@ -22,8 +31,9 @@ def _get_pin_info(pin_ref, parts, lib):
     return part_id, ctype, pin_info
 
 
-def check(netlist, lib):
+def check_with_warnings(netlist, lib):
     errors = []
+    warnings = []
     parts = netlist.get("parts", {})
     values = netlist.get("values", {})
     nets = netlist.get("nets", {})
@@ -48,7 +58,7 @@ def check(netlist, lib):
 
     # If there are basic reference errors, return them early to avoid crashing on later checks
     if errors:
-        return errors
+        return errors, warnings
 
     # 2. Pin on at most one net
     seen_pins = {}
@@ -210,20 +220,89 @@ def check(netlist, lib):
 
                 v_source = level if level is not None else v
                 if v_source is not None:
-                    vf = lib["led"].get("vf", 2.0)
+                    vf = lib.get("led", {}).get("vf", 2.0)
                     r_ohms = values.get(resistor_part_id, 0)
                     if r_ohms and r_ohms > 0:
                         current_ma = (v_source - vf) / r_ohms * 1000.0
-                        if role == "gpio":
-                            max_source_ma = driver_info.get("max_source_ma", 16)
-                            if isinstance(max_source_ma, (int, float)) and current_ma > max_source_ma:
-                                errors.append(
-                                    f"Current {current_ma:.1f} mA exceeds GPIO rated limit of {max_source_ma} mA on '{p_ref}'"
+                        if role in ("gpio", "output"):
+                            raw_max = driver_info.get("max_source_ma")
+                            if raw_max == "UNVERIFIED":
+                                warn_msg = (
+                                    f"Limit 'max_source_ma' on '{p_ref}' is UNVERIFIED; "
+                                    f"using conservative default of {DEFAULT_UNVERIFIED_MAX_SOURCE_MA} mA"
                                 )
-                        max_led_ma = lib["led"].get("max_ma", 20)
-                        if isinstance(max_led_ma, (int, float)) and current_ma > max_led_ma:
+                                if warn_msg not in warnings:
+                                    warnings.append(warn_msg)
+                                max_source_ma = DEFAULT_UNVERIFIED_MAX_SOURCE_MA
+                            elif isinstance(raw_max, (int, float)):
+                                max_source_ma = raw_max
+                            else:
+                                max_source_ma = 16 if role == "gpio" else None
+
+                            if max_source_ma is not None and current_ma > max_source_ma:
+                                pin_type = "GPIO" if role == "gpio" else "output"
+                                errors.append(
+                                    f"Current {current_ma:.1f} mA exceeds {pin_type} rated limit of {max_source_ma} mA on '{p_ref}'"
+                                )
+
+                        raw_led_max = lib.get("led", {}).get("max_ma", 20)
+                        if raw_led_max == "UNVERIFIED":
+                            warn_msg = (
+                                f"Limit 'max_ma' on LED '{part_id}' is UNVERIFIED; "
+                                f"using conservative default of 10.0 mA"
+                            )
+                            if warn_msg not in warnings:
+                                warnings.append(warn_msg)
+                            max_led_ma = 10.0
+                        elif isinstance(raw_led_max, (int, float)):
+                            max_led_ma = raw_led_max
+                        else:
+                            max_led_ma = 20
+
+                        if current_ma > max_led_ma:
                             errors.append(
                                 f"Current {current_ma:.1f} mA exceeds LED limit of {max_led_ma} mA on '{part_id}'"
                             )
 
+    # 7. Check input sink current limits if driven by a source
+    for net_name, pin_list in nets.items():
+        sink_pins = []
+        source_pins = []
+        for pin_ref in pin_list:
+            _, _, pinfo = _get_pin_info(pin_ref, parts, lib)
+            if not pinfo:
+                continue
+            if "max_sink_ma" in pinfo:
+                sink_pins.append((pin_ref, pinfo))
+            elif pinfo.get("role") in ("gpio", "power", "output"):
+                source_pins.append((pin_ref, pinfo))
+
+        for s_ref, s_info in sink_pins:
+            raw_sink = s_info.get("max_sink_ma")
+            if raw_sink == "UNVERIFIED":
+                warn_msg = (
+                    f"Limit 'max_sink_ma' on '{s_ref}' is UNVERIFIED; "
+                    f"using conservative default of {DEFAULT_UNVERIFIED_MAX_SINK_MA} mA"
+                )
+                if warn_msg not in warnings:
+                    warnings.append(warn_msg)
+                effective_sink = DEFAULT_UNVERIFIED_MAX_SINK_MA
+            elif isinstance(raw_sink, (int, float)):
+                effective_sink = raw_sink
+            else:
+                effective_sink = None
+
+            if effective_sink is not None:
+                for src_ref, src_info in source_pins:
+                    src_max = src_info.get("max_source_ma")
+                    if isinstance(src_max, (int, float)) and src_max < effective_sink:
+                        errors.append(
+                            f"Pin '{src_ref}' max source current {src_max} mA cannot support '{s_ref}' sink requirement of {effective_sink} mA on net '{net_name}'"
+                        )
+
+    return errors, warnings
+
+
+def check(netlist, lib):
+    errors, _ = check_with_warnings(netlist, lib)
     return errors

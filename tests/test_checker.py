@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from checker import check, load_parts  # noqa: E402
+from checker import DEFAULT_UNVERIFIED_MAX_SOURCE_MA, check, check_with_warnings, load_parts  # noqa: E402
 
 LIB = load_parts()
 
@@ -206,6 +206,81 @@ class CheckerTests(unittest.TestCase):
         }
         errors = check(design, custom_lib)
         self.assertFalse(any("5.0V sensor output" in e for e in errors))
+
+    def test_led_unverified_gpio_limit_under_8ma_warns_and_passes(self):
+        custom_lib = dict(LIB)
+        custom_lib["custom_mcu"] = {
+            "pins": {
+                "GPIO1": {"role": "gpio", "level": 3.3, "max_source_ma": "UNVERIFIED"},
+                "GND": {"role": "ground"},
+            }
+        }
+        # (3.3 - 2.0) / 330 ohm = ~3.94 mA < 8.0 mA
+        design = {
+            "name": "unverified_gpio_pass",
+            "parts": {"mcu": "custom_mcu", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 330},
+            "nets": {
+                "SIGNAL": ["mcu.GPIO1", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["mcu.GND", "led1.cathode"],
+            },
+        }
+        errors, warnings = check_with_warnings(design, custom_lib)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("max_source_ma" in w and "UNVERIFIED" in w for w in warnings))
+        self.assertEqual(check(design, custom_lib), [])
+
+    def test_led_unverified_sensor_limit_under_8ma_warns_and_passes(self):
+        example_path = Path(__file__).resolve().parent.parent / "examples" / "pir_light.json"
+        with open(example_path, "r") as f:
+            design = json.load(f)
+        errors, warnings = check_with_warnings(design, LIB)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("pir.OUT" in w and "UNVERIFIED" in w for w in warnings))
+        self.assertEqual(check(design, LIB), [])
+
+    def test_led_unverified_gpio_limit_over_8ma_fails(self):
+        # (3.3 - 2.0) / 100 ohm = 13.0 mA > 8.0 mA default
+        custom_lib = dict(LIB)
+        custom_lib["custom_mcu"] = {
+            "pins": {
+                "GPIO1": {"role": "gpio", "level": 3.3, "max_source_ma": "UNVERIFIED"},
+                "GND": {"role": "ground"},
+            }
+        }
+        design = {
+            "name": "unverified_gpio_fail",
+            "parts": {"mcu": "custom_mcu", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 100},
+            "nets": {
+                "SIGNAL": ["mcu.GPIO1", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["mcu.GND", "led1.cathode"],
+            },
+        }
+        errors, warnings = check_with_warnings(design, custom_lib)
+        self.assertTrue(any("max_source_ma" in w and "UNVERIFIED" in w for w in warnings))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in errors))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in check(design, custom_lib)))
+
+    def test_led_unverified_sensor_limit_over_8ma_fails(self):
+        # pir_sensor with 100 ohm resistor: current is 13.0 mA > 8.0 mA default
+        design = {
+            "name": "pir_overcurrent",
+            "parts": {"pi": "raspberry_pi_4", "pir": "pir_sensor", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 100},
+            "nets": {
+                "POWER": ["pi.5V", "pir.VCC"],
+                "GND": ["pi.GND", "pir.GND", "led1.cathode"],
+                "SIGNAL": ["pir.OUT", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+            },
+        }
+        errors, warnings = check_with_warnings(design, LIB)
+        self.assertTrue(any("pir.OUT" in w and "UNVERIFIED" in w for w in warnings))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in errors))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in check(design, LIB)))
 
 
 if __name__ == "__main__":
