@@ -77,7 +77,80 @@ def check(netlist, lib):
         if has_gpio_3v3 and has_5v_pin:
             errors.append(f"5.0V pin on a 3.3V GPIO net '{net_name}'")
 
-    # 4. LED rules: cathode on ground, current-limiting resistor, current limits
+    # 4. 5V sensor output must not drive a GPIO directly
+    for net_name, pin_list in nets.items():
+        sensor_5v_pins = []
+        gpio_3v3_pins = []
+        for pin_ref in pin_list:
+            p_id, ctype, pinfo = _get_pin_info(pin_ref, parts, lib)
+            if not pinfo:
+                continue
+            role = pinfo.get("role")
+            level = pinfo.get("level")
+            v = pinfo.get("v")
+
+            # Check for 5V sensor output
+            is_sensor = "sensor" in ctype or "pir" in ctype
+            is_5v_output = (level == 5.0 or v == 5.0) and role in ("gpio", "output")
+            if is_sensor and is_5v_output:
+                sensor_5v_pins.append(pin_ref)
+            elif role == "gpio" and level == 3.3 and not is_sensor:
+                gpio_3v3_pins.append(pin_ref)
+
+        if sensor_5v_pins and gpio_3v3_pins:
+            for s_pin in sensor_5v_pins:
+                for g_pin in gpio_3v3_pins:
+                    errors.append(
+                        f"5.0V sensor output '{s_pin}' cannot directly drive 3.3V GPIO pin '{g_pin}' on net '{net_name}'"
+                    )
+
+    # 5. Relay rules: flyback diode and driver transistor for bare relay coils
+    for part_id, ctype in parts.items():
+        cinfo = lib.get(ctype, {})
+        is_bare_relay = ctype == "relay" or (
+            cinfo.get("has_flyback_diode") is False
+            or cinfo.get("has_driver_transistor") is False
+        )
+        if not is_bare_relay:
+            continue
+
+        pos_pin_ref = f"{part_id}.coil_pos"
+        neg_pin_ref = f"{part_id}.coil_neg"
+        pos_net = seen_pins.get(pos_pin_ref)
+        neg_net = seen_pins.get(neg_pin_ref)
+
+        if not pos_net or not neg_net:
+            errors.append(
+                f"Relay coil '{part_id}' terminals ('{pos_pin_ref}', '{neg_pin_ref}') must be connected"
+            )
+            continue
+
+        # Rule: A relay coil needs a flyback diode across its terminals (cathode to positive, anode to negative)
+        has_flyback = False
+        for d_id, d_type in parts.items():
+            if d_type == "diode":
+                cathode_net = seen_pins.get(f"{d_id}.cathode")
+                anode_net = seen_pins.get(f"{d_id}.anode")
+                if cathode_net == pos_net and anode_net == neg_net:
+                    has_flyback = True
+                    break
+        if not has_flyback:
+            errors.append(
+                f"Relay coil '{part_id}' needs a flyback diode connected across its coil terminals ('{pos_pin_ref}' and '{neg_pin_ref}')"
+            )
+
+        # Rule: A relay driven from a GPIO needs a transistor
+        for c_net_name in (pos_net, neg_net):
+            for p_ref in nets.get(c_net_name, []):
+                if p_ref in (pos_pin_ref, neg_pin_ref):
+                    continue
+                _, _, pinfo = _get_pin_info(p_ref, parts, lib)
+                if pinfo and pinfo.get("role") == "gpio":
+                    errors.append(
+                        f"Relay coil '{part_id}' driven directly from GPIO pin '{p_ref}' on net '{c_net_name}' needs a driver transistor"
+                    )
+
+    # 6. LED rules: cathode on ground, current-limiting resistor, current limits
     for part_id, ctype in parts.items():
         if ctype != "led":
             continue

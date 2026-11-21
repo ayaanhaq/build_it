@@ -63,6 +63,93 @@ class CheckerTests(unittest.TestCase):
         errors = check(design, LIB)
         self.assertTrue(any("not on a ground net" in e for e in errors))
 
+    def test_5v_sensor_driving_gpio_fails(self):
+        design = {
+            "name": "pir_bad_gpio",
+            "parts": {"pir": "pir_sensor_5v", "pi": "raspberry_pi_4"},
+            "values": {},
+            "nets": {
+                "SENSOR_NET": ["pir.OUT", "pi.GPIO17"]
+            }
+        }
+        errors = check(design, LIB)
+        self.assertTrue(any("5.0V sensor output" in e or "cannot directly drive" in e for e in errors))
+
+    def test_relay_coil_missing_flyback_diode_fails(self):
+        design = {
+            "name": "relay_no_diode",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "k1": "relay",
+                "q1": "transistor",
+                "r1": "resistor"
+            },
+            "values": {"r1": 1000},
+            "nets": {
+                "VCC": ["pi.5V", "k1.coil_pos"],
+                "COIL_DRIVE": ["k1.coil_neg", "q1.collector"],
+                "BASE": ["pi.GPIO17", "r1.a"],
+                "BASE_IN": ["r1.b", "q1.base"],
+                "GND": ["pi.GND", "q1.emitter"]
+            }
+        }
+        errors = check(design, LIB)
+        self.assertTrue(any("flyback diode" in e for e in errors))
+
+    def test_relay_driven_from_gpio_needs_transistor_fails(self):
+        design = {
+            "name": "relay_direct_gpio",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "k1": "relay",
+                "d1": "diode"
+            },
+            "values": {},
+            "nets": {
+                "GPIO_COIL": ["pi.GPIO17", "k1.coil_pos", "d1.cathode"],
+                "GND": ["pi.GND", "k1.coil_neg", "d1.anode"]
+            }
+        }
+        errors = check(design, LIB)
+        self.assertTrue(any("transistor" in e for e in errors))
+
+    def test_valid_relay_with_transistor_and_diode_passes(self):
+        design = {
+            "name": "relay_valid",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "k1": "relay",
+                "d1": "diode",
+                "q1": "transistor",
+                "r1": "resistor"
+            },
+            "values": {"r1": 1000},
+            "nets": {
+                "VCC": ["pi.5V", "k1.coil_pos", "d1.cathode"],
+                "COIL_DRIVE": ["k1.coil_neg", "d1.anode", "q1.collector"],
+                "BASE": ["pi.GPIO17", "r1.a"],
+                "BASE_IN": ["r1.b", "q1.base"],
+                "GND": ["pi.GND", "q1.emitter"]
+            }
+        }
+        self.assertEqual(check(design, LIB), [])
+
+    def test_relay_module_passes(self):
+        design = {
+            "name": "relay_mod",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "k1": "relay_module"
+            },
+            "values": {},
+            "nets": {
+                "VCC": ["pi.5V", "k1.VCC"],
+                "GND": ["pi.GND", "k1.GND"],
+                "CONTROL": ["pi.GPIO17", "k1.IN"]
+            }
+        }
+        self.assertEqual(check(design, LIB), [])
+
 
 if __name__ == "__main__":
     unittest.main()
