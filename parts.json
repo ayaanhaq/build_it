@@ -25,5 +25,137 @@
       "a": {"role": "passive"},
       "b": {"role": "passive"}
     }
+  },
+  "pir_sensor": {
+    "_comment": "HC-SR501 PIR Motion Detector Module. Source: HC-SR501 Datasheet / BISS0001 IC Datasheet.",
+    "pins": {
+      "VCC": {
+        "role": "power",
+        "v": 5.0,
+        "_comment": "Supply voltage: 4.5V-20V DC, nominal 5.0V (Source: HC-SR501 Datasheet)"
+      },
+      "GND": {
+        "role": "ground"
+      },
+      "OUT": {
+        "role": "gpio",
+        "level": 3.3,
+        "max_source_ma": "UNVERIFIED",
+        "_comment": "Output: 3.3V TTL High level via onboard 3.3V regulator (Source: HC-SR501 Datasheet). Max source current from BISS0001 is unrated for sustained loads, marked UNVERIFIED."
+      }
+    }
+  },
+  "pir_sensor_5v": {
+    "_comment": "5V PIR Motion Sensor (Parallax #555-28027 style). Source: Parallax PIR Sensor Datasheet Rev 1.4.",
+    "pins": {
+      "VCC": {
+        "role": "power",
+        "v": 5.0,
+        "_comment": "Supply voltage: 3.3V-5V DC, nominal 5.0V (Source: Parallax Datasheet Rev 1.4)"
+      },
+      "GND": {
+        "role": "ground"
+      },
+      "OUT": {
+        "role": "gpio",
+        "level": 5.0,
+        "max_source_ma": 23,
+        "_comment": "Output: 5.0V logic High when supplied with 5V; max output current 23 mA (Source: Parallax #555-28027 Datasheet Rev 1.4)"
+      }
+    }
+  },
+  "relay_module": {
+    "_comment": "1-Channel 5V Relay Module with integrated driver transistor and flyback diode. Source: Songle SRD-05VDC-SL-C datasheet & Keyes Relay Module Schematic.",
+    "has_driver_transistor": true,
+    "has_flyback_diode": true,
+    "pins": {
+      "VCC": {
+        "role": "power",
+        "v": 5.0,
+        "_comment": "5.0V DC operating voltage for relay coil (Source: Songle SRD-05VDC-SL-C datasheet)"
+      },
+      "GND": {
+        "role": "ground"
+      },
+      "IN": {
+        "role": "gpio",
+        "level": 3.3,
+        "max_sink_ma": "UNVERIFIED",
+        "_comment": "Digital input control signal. Active trigger drives base of onboard switching transistor. Drive current through opto/base resistor typically 2-4 mA, marked UNVERIFIED."
+      },
+      "COM": {
+        "role": "passive",
+        "_comment": "Common contact rated 10A 250VAC / 10A 30VDC (Source: Songle SRD-05VDC-SL-C datasheet)"
+      },
+      "NO": {
+        "role": "passive",
+        "_comment": "Normally Open contact rated 10A 250VAC / 10A 30VDC (Source: Songle SRD-05VDC-SL-C datasheet)"
+      },
+      "NC": {
+        "role": "passive",
+        "_comment": "Normally Closed contact rated 10A 250VAC / 10A 30VDC (Source: Songle SRD-05VDC-SL-C datasheet)"
+      }
+    }
+  },
+  "relay": {
+    "_comment": "Bare Songle SRD-05VDC-SL-C Electromechanical Relay. Source: Songle SRD Datasheet.",
+    "has_driver_transistor": false,
+    "has_flyback_diode": false,
+    "coil_current_ma": 71.4,
+    "pins": {
+      "coil_pos": {
+        "role": "passive",
+        "_comment": "Coil terminal 1. Nominal coil voltage 5.0V, coil resistance 70 ohm (Source: Songle SRD datasheet)"
+      },
+      "coil_neg": {
+        "role": "passive",
+        "_comment": "Coil terminal 2. Nominal coil power 0.36W, coil current ~71.4 mA at 5V (Source: Songle SRD datasheet)"
+      },
+      "COM": {
+        "role": "passive",
+        "_comment": "Common contact rated 10A 250VAC / 30VDC (Source: Songle SRD datasheet)"
+      },
+      "NO": {
+        "role": "passive",
+        "_comment": "Normally open contact rated 10A 250VAC / 30VDC (Source: Songle SRD datasheet)"
+      },
+      "NC": {
+        "role": "passive",
+        "_comment": "Normally closed contact rated 10A 250VAC / 30VDC (Source: Songle SRD datasheet)"
+      }
+    }
+  },
+  "diode": {
+    "_comment": "1N4001 General Purpose Rectifier / Flyback Diode. Source: Diodes Inc. / Vishay 1N4001 Datasheet.",
+    "vf": 1.0,
+    "max_ma": 1000,
+    "pins": {
+      "anode": {
+        "role": "anode",
+        "_comment": "Anode terminal"
+      },
+      "cathode": {
+        "role": "cathode",
+        "_comment": "Cathode terminal"
+      }
+    }
+  },
+  "transistor": {
+    "_comment": "2N2222 NPN Bipolar Junction Transistor. Source: OnSemi 2N2222 Datasheet.",
+    "max_collector_ma": 800,
+    "pins": {
+      "base": {
+        "role": "passive",
+        "_comment": "Base control terminal"
+      },
+      "collector": {
+        "role": "passive",
+        "_comment": "Collector terminal. Max continuous Ic = 800 mA (Source: 2N2222 Datasheet)"
+      },
+      "emitter": {
+        "role": "passive",
+        "_comment": "Emitter terminal"
+      }
+    }
   }
 }
