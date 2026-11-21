@@ -215,12 +215,12 @@ def check(netlist, lib):
                         current_ma = (v_source - vf) / r_ohms * 1000.0
                         if role == "gpio":
                             max_source_ma = driver_info.get("max_source_ma", 16)
-                            if current_ma > max_source_ma:
+                            if isinstance(max_source_ma, (int, float)) and current_ma > max_source_ma:
                                 errors.append(
                                     f"Current {current_ma:.1f} mA exceeds GPIO rated limit of {max_source_ma} mA on '{p_ref}'"
                                 )
                         max_led_ma = lib["led"].get("max_ma", 20)
-                        if current_ma > max_led_ma:
+                        if isinstance(max_led_ma, (int, float)) and current_ma > max_led_ma:
                             errors.append(
                                 f"Current {current_ma:.1f} mA exceeds LED limit of {max_led_ma} mA on '{part_id}'"
                             )

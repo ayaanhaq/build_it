@@ -1,0 +1,13 @@
+{
+  "name": "pir_bad_5v",
+  "parts": {
+    "pi": "raspberry_pi_4",
+    "pir": "pir_sensor_5v"
+  },
+  "values": {},
+  "nets": {
+    "POWER": ["pi.5V", "pir.VCC"],
+    "GND": ["pi.GND", "pir.GND"],
+    "SENSOR_SIGNAL": ["pir.OUT", "pi.GPIO17"]
+  }
+}

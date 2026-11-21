@@ -1,0 +1,18 @@
+{
+  "name": "pir_light",
+  "parts": {
+    "pi": "raspberry_pi_4",
+    "pir": "pir_sensor",
+    "led1": "led",
+    "r1": "resistor"
+  },
+  "values": {
+    "r1": 330
+  },
+  "nets": {
+    "POWER": ["pi.5V", "pir.VCC"],
+    "GND": ["pi.GND", "pir.GND", "led1.cathode"],
+    "PIR_OUT": ["pir.OUT", "r1.a"],
+    "LED_ANODE": ["r1.b", "led1.anode"]
+  }
+}

@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -149,6 +150,20 @@ class CheckerTests(unittest.TestCase):
             }
         }
         self.assertEqual(check(design, LIB), [])
+
+    def test_pir_light_example_passes(self):
+        example_path = Path(__file__).resolve().parent.parent / "examples" / "pir_light.json"
+        with open(example_path, "r") as f:
+            design = json.load(f)
+        self.assertEqual(check(design, LIB), [])
+
+    def test_pir_bad_5v_example_rejected(self):
+        example_path = Path(__file__).resolve().parent.parent / "examples" / "pir_bad_5v.json"
+        with open(example_path, "r") as f:
+            design = json.load(f)
+        errors = check(design, LIB)
+        self.assertTrue(len(errors) > 0)
+        self.assertTrue(any("5.0V sensor output" in e or "3.3V GPIO" in e for e in errors))
 
 
 if __name__ == "__main__":
