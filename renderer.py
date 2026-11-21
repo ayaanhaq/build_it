@@ -87,6 +87,16 @@ def generate_steps(netlist, lib=None):
     return grouped, final_step
 
 
+def get_step_list(netlist, lib=None):
+    grouped, final_step = generate_steps(netlist, lib)
+    steps = []
+    for sub in ("power", "signal", "output"):
+        for instruction, check_text in grouped.get(sub, []):
+            steps.append(f"{instruction} {check_text}")
+    steps.append(final_step)
+    return steps
+
+
 def render(netlist, lib=None):
     name = netlist.get("name", "build")
     parts = netlist.get("parts", {})
