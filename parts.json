@@ -1,0 +1,29 @@
+{
+  "raspberry_pi_4": {
+    "pins": {
+      "3V3": {"role": "power", "v": 3.3},
+      "5V": {"role": "power", "v": 5.0},
+      "GND": {"role": "ground"},
+      "GPIO17": {"role": "gpio", "level": 3.3, "max_source_ma": 16},
+      "GPIO18": {"role": "gpio", "level": 3.3, "max_source_ma": 16},
+      "GPIO27": {"role": "gpio", "level": 3.3, "max_source_ma": 16},
+      "GPIO22": {"role": "gpio", "level": 3.3, "max_source_ma": 16},
+      "GPIO23": {"role": "gpio", "level": 3.3, "max_source_ma": 16},
+      "GPIO24": {"role": "gpio", "level": 3.3, "max_source_ma": 16}
+    }
+  },
+  "led": {
+    "pins": {
+      "anode": {"role": "anode"},
+      "cathode": {"role": "cathode"}
+    },
+    "vf": 2.0,
+    "max_ma": 20
+  },
+  "resistor": {
+    "pins": {
+      "a": {"role": "passive"},
+      "b": {"role": "passive"}
+    }
+  }
+}

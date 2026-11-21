@@ -1,0 +1,10 @@
+{
+  "name": "blink_led",
+  "parts": {"pi": "raspberry_pi_4", "led1": "led", "r1": "resistor"},
+  "values": {"r1": 330},
+  "nets": {
+    "SIGNAL": ["pi.GPIO17", "r1.a"],
+    "LED_ANODE": ["r1.b", "led1.anode"],
+    "GND": ["pi.GND", "led1.cathode"]
+  }
+}
