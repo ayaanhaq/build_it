@@ -84,6 +84,7 @@ Each part entry contains:
   - **`max_sink_ma`** *(float or "UNVERIFIED")*: Maximum current the pin can sink in mA.
 - **Component-level attributes**:
   - `vf`: Forward voltage drop in Volts (for LEDs/diodes).
+  - `vbe`: Base-emitter saturation voltage drop in Volts (for transistors, e.g. 0.7).
   - `max_ma`: Maximum rated continuous forward current in mA.
   - `has_driver_transistor`: Boolean indicating onboard driver transistor.
   - `has_flyback_diode`: Boolean indicating onboard inductive flyback diode.

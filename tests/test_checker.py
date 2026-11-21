@@ -282,6 +282,78 @@ class CheckerTests(unittest.TestCase):
         self.assertTrue(any("exceeds" in e and "8.0" in e for e in errors))
         self.assertTrue(any("exceeds" in e and "8.0" in e for e in check(design, LIB)))
 
+    def test_transistor_base_directly_to_gpio_fails(self):
+        design = {
+            "name": "transistor_direct_gpio",
+            "parts": {"pi": "raspberry_pi_4", "q1": "transistor"},
+            "values": {},
+            "nets": {
+                "BASE": ["pi.GPIO17", "q1.base"],
+                "GND": ["pi.GND", "q1.emitter"],
+            },
+        }
+        errors = check(design, LIB)
+        self.assertTrue(len(errors) > 0)
+        self.assertTrue(any("q1" in e and "GPIO17" in e for e in errors))
+
+    def test_transistor_base_through_1k_resistor_passes(self):
+        design = {
+            "name": "transistor_1k_resistor",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "q1": "transistor",
+                "r1": "resistor",
+            },
+            "values": {"r1": 1000},
+            "nets": {
+                "BASE_DRIVE": ["pi.GPIO17", "r1.a"],
+                "BASE_IN": ["r1.b", "q1.base"],
+                "GND": ["pi.GND", "q1.emitter"],
+            },
+        }
+        self.assertEqual(check(design, LIB), [])
+
+    def test_transistor_base_through_100ohm_resistor_fails_with_gpio_limit_error(self):
+        # (3.3 - 0.7) / 100 = 26.0 mA > 16 mA GPIO limit
+        design = {
+            "name": "transistor_100ohm_resistor",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "q1": "transistor",
+                "r1": "resistor",
+            },
+            "values": {"r1": 100},
+            "nets": {
+                "BASE_DRIVE": ["pi.GPIO17", "r1.a"],
+                "BASE_IN": ["r1.b", "q1.base"],
+                "GND": ["pi.GND", "q1.emitter"],
+            },
+        }
+        errors = check(design, LIB)
+        self.assertTrue(len(errors) > 0)
+        self.assertTrue(any("exceeds GPIO rated limit" in e or ("GPIO" in e and "limit" in e) for e in errors))
+        self.assertTrue(any("26.0" in e for e in errors))
+
+    def test_transistor_emitter_not_on_ground_fails(self):
+        design = {
+            "name": "transistor_no_ground_emitter",
+            "parts": {
+                "pi": "raspberry_pi_4",
+                "q1": "transistor",
+                "r1": "resistor",
+            },
+            "values": {"r1": 1000},
+            "nets": {
+                "BASE_DRIVE": ["pi.GPIO17", "r1.a"],
+                "BASE_IN": ["r1.b", "q1.base"],
+                "EMITTER": ["q1.emitter"],
+                "GND": ["pi.GND"],
+            },
+        }
+        errors = check(design, LIB)
+        self.assertTrue(len(errors) > 0)
+        self.assertTrue(any("emitter" in e and "ground" in e for e in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

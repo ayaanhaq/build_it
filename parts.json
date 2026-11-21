@@ -144,6 +144,8 @@
   },
   "transistor": {
     "_comment": "2N2222 NPN Bipolar Junction Transistor. Source: OnSemi 2N2222 Datasheet.",
+    "vbe": 0.7,
+    "_comment_vbe": "Base-emitter saturation voltage Vbe drop typical value 0.7V; verify against 2N2222 datasheet.",
     "max_collector_ma": 800,
     "pins": {
       "base": {

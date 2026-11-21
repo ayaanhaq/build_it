@@ -161,7 +161,94 @@ def check_with_warnings(netlist, lib):
                         f"Relay coil '{part_id}' driven directly from GPIO pin '{p_ref}' on net '{c_net_name}' needs a driver transistor"
                     )
 
-    # 6. LED rules: cathode on ground, current-limiting resistor, current limits
+    # 6. Transistor rules: base resistor when driven by GPIO, emitter on ground, base current limits
+    for part_id, ctype in parts.items():
+        cinfo = lib.get(ctype, {})
+        pins = cinfo.get("pins", {})
+        if ctype != "transistor" and not ("base" in pins and "emitter" in pins):
+            continue
+
+        emitter_ref = f"{part_id}.emitter"
+        emitter_net = seen_pins.get(emitter_ref)
+        if not emitter_net:
+            errors.append(f"Transistor '{part_id}' emitter is not connected")
+        else:
+            has_ground = False
+            for p_ref in nets.get(emitter_net, []):
+                _, _, pinfo = _get_pin_info(p_ref, parts, lib)
+                if pinfo and pinfo.get("role") == "ground":
+                    has_ground = True
+                    break
+            if not has_ground:
+                errors.append(f"Transistor '{part_id}' emitter is not on a ground net '{emitter_net}'")
+
+        base_ref = f"{part_id}.base"
+        base_net = seen_pins.get(base_ref)
+        if not base_net:
+            errors.append(f"Transistor '{part_id}' base is not connected")
+            continue
+
+        # Check if base net directly contains a GPIO pin
+        for p_ref in nets.get(base_net, []):
+            if p_ref == base_ref:
+                continue
+            _, _, pinfo = _get_pin_info(p_ref, parts, lib)
+            if pinfo and pinfo.get("role") == "gpio":
+                errors.append(
+                    f"Transistor '{part_id}' base on net '{base_net}' is directly connected to GPIO pin '{p_ref}' without a series base resistor"
+                )
+
+        # Check if base is driven through a resistor by a GPIO pin
+        resistor_part_id = None
+        resistor_pin_name = None
+        for p_ref in nets.get(base_net, []):
+            if p_ref == base_ref:
+                continue
+            p_id, p_type, _ = _get_pin_info(p_ref, parts, lib)
+            if p_type == "resistor":
+                resistor_part_id = p_id
+                resistor_pin_name = p_ref.split(".")[1]
+                break
+
+        if resistor_part_id:
+            other_r_pin = "a" if resistor_pin_name == "b" else "b"
+            other_r_ref = f"{resistor_part_id}.{other_r_pin}"
+            gpio_net = seen_pins.get(other_r_ref)
+            if gpio_net:
+                for p_ref in nets.get(gpio_net, []):
+                    if p_ref == other_r_ref:
+                        continue
+                    _, _, ginfo = _get_pin_info(p_ref, parts, lib)
+                    if ginfo and ginfo.get("role") == "gpio":
+                        vbe = cinfo.get("vbe", 0.7)
+                        v_gpio = ginfo.get("level", 3.3)
+                        r_ohms = values.get(resistor_part_id, 0)
+                        if r_ohms and r_ohms > 0:
+                            base_current_ma = (v_gpio - vbe) / r_ohms * 1000.0
+                            raw_max = ginfo.get("max_source_ma")
+                            if raw_max == "UNVERIFIED":
+                                warn_msg = (
+                                    f"Limit 'max_source_ma' on '{p_ref}' is UNVERIFIED; "
+                                    f"using conservative default of {DEFAULT_UNVERIFIED_MAX_SOURCE_MA} mA"
+                                )
+                                if warn_msg not in warnings:
+                                    warnings.append(warn_msg)
+                                max_source_ma = DEFAULT_UNVERIFIED_MAX_SOURCE_MA
+                            elif isinstance(raw_max, (int, float)):
+                                max_source_ma = raw_max
+                            else:
+                                max_source_ma = 16
+
+                            if base_current_ma > max_source_ma:
+                                errors.append(
+                                    f"Base current {base_current_ma:.1f} mA exceeds GPIO rated limit of {max_source_ma} mA on '{p_ref}'"
+                                )
+                        else:
+                            errors.append(
+                                f"Transistor '{part_id}' base resistor '{resistor_part_id}' must have a positive resistance value"
+                            )
+
+    # 7. LED rules: cathode on ground, current-limiting resistor, current limits
     for part_id, ctype in parts.items():
         if ctype != "led":
             continue
@@ -264,7 +351,7 @@ def check_with_warnings(netlist, lib):
                                 f"Current {current_ma:.1f} mA exceeds LED limit of {max_led_ma} mA on '{part_id}'"
                             )
 
-    # 7. Check input sink current limits if driven by a source
+    # 8. Check input sink current limits if driven by a source
     for net_name, pin_list in nets.items():
         sink_pins = []
         source_pins = []
