@@ -3,314 +3,92 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Builders Archive — Step-by-Step 3D Builds</title>
-  <meta name="description" content="A blueprint-themed 3D modeling and build instruction generator.">
+  <title>Builders Archive</title>
+  <meta name="description" content="Builders Archive — Traditional Web Tech Stack">
 
-  <!-- Google Fonts: Barlow Condensed, Architects Daughter, IBM Plex Mono, IBM Plex Sans -->
+  <!-- Inter Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+
+  <!-- Tailwind CSS CDN for instant styling support -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- Traditional CSS Stylesheet -->
   <link rel="stylesheet" href="./css/styles.css">
 </head>
-<body>
-  <div class="blueprint-app">
+<body class="bg-black text-white min-h-screen m-0 p-0 overflow-x-hidden">
 
-    <!-- SIDEBAR NAVIGATION -->
-    <nav class="sidebar" aria-label="Main Navigation">
-      <div class="brand-header">
-        <span class="brand-title">BUILDERS<br>ARCHIVE</span>
-        <span class="brand-tagline">step-by-step 3D builds</span>
-      </div>
+  <!-- Background Three.js Canvas Container -->
+  <div id="three-canvas-container" aria-hidden="true"></div>
 
-      <div class="sd-tabs" id="tabsList">
-        <!-- Rendered dynamically by app.js -->
-      </div>
+  <!-- Center-aligned Main Viewport -->
+  <main class="app-container">
+    <div class="w-full max-w-3xl mx-auto p-3">
+      <div class="bg-[#1e1e1e] border border-white/10 rounded-3xl p-3 shadow-xl focus-within:border-white/25 transition-all">
+        <textarea
+          id="chatInputTextarea"
+          rows="2"
+          placeholder="Message anything..."
+          class="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
+        ></textarea>
 
-      <div class="sd-nav-foot">
-        <span id="sheetNameDisplay">SHEET CHAT</span>
-        <span>X <span id="coordXDisplay">----</span>  Y <span id="coordYDisplay">----</span></span>
-      </div>
-    </nav>
-
-    <!-- MAIN INTERACTIVE BLUEPRINT CANVAS -->
-    <main class="main-canvas" id="mainCanvas">
-
-      <!-- Technical Rulers -->
-      <div class="sd-ruler-h" id="rulerHorizontal" aria-hidden="true"></div>
-      <div class="sd-ruler-v" aria-hidden="true"></div>
-
-      <!-- Live Cursor Glow & Crosshairs -->
-      <div class="cursor-glow" id="cursorGlow" style="display: none;" aria-hidden="true"></div>
-      <div class="crosshair-v" id="crosshairV" style="display: none;" aria-hidden="true"></div>
-      <div class="crosshair-h" id="crosshairH" style="display: none;" aria-hidden="true"></div>
-
-      <!-- ============ SHEET 01: CHAT ============ -->
-      <section class="sheet-container chat-sheet" id="sheet-chat" style="display: none;">
-        <div class="sheet-header">
-          <span class="sheet-tag">SHEET A-001 · GENERAL</span>
-          <h1 class="sd-h1">What are we<br>building?</h1>
-        </div>
-
-        <div style="position: relative; width: 100%; display: flex; flex-direction: column; gap: 14px;">
-          <!-- Messages feed -->
-          <div class="chat-messages" id="chatMessagesList" style="display: none;" aria-live="polite"></div>
-
-          <!-- Composer box -->
-          <div class="sd-composer">
-            <label for="chatDraftInput" class="sr-only">Describe what you want to build</label>
-            <textarea id="chatDraftInput" class="sd-input" rows="2" placeholder="Describe what you want to build — a bookshelf, a shed, a planter…"></textarea>
-            <div class="composer-toolbar">
-              <button type="button" class="sd-plus" id="chatAttachBtn" aria-label="Attach a sketch or photo">
-                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-              </button>
-              <button type="button" class="sd-send" id="sendChatBtn" aria-label="Send message" style="opacity: 0.5;">
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
-              </button>
-            </div>
+        <div class="flex items-center justify-between px-1 pt-2">
+          <div class="flex items-center gap-2">
+            <button
+              id="chatPlusBtn"
+              type="button"
+              class="p-2 rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition"
+              aria-label="Add attachment"
+            >
+              <!-- Plus icon (size 20) -->
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14"></path>
+                <path d="M12 5v14"></path>
+              </svg>
+            </button>
+            <span class="text-xs text-gray-500 select-none">
+              Ask anything
+            </span>
           </div>
 
-          <!-- Quick chips -->
-          <div class="chips-row">
-            <button type="button" class="sd-chip" id="chipSample">See a sample build</button>
-            <button type="button" class="sd-chip" id="chipNewProj">New project</button>
-            <button type="button" class="sd-chip" id="chipHow">How it works</button>
-          </div>
-
-          <!-- Handwritten side note -->
-          <aside class="sd-note-side" aria-hidden="true">
-            <svg width="70" height="34" viewBox="0 0 70 34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M66 28C50 30 28 26 8 10"></path><path d="M8 10l2 9M8 10l9 1"></path></svg>
-            <span>tell it what you want —<br>it draws the steps</span>
-          </aside>
-        </div>
-      </section>
-
-      <!-- ============ SHEET 02: BUILD (3D WORKBENCH) ============ -->
-      <section class="sheet-container build-sheet" id="sheet-build" style="display: none;">
-        <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
-          <div class="sheet-header">
-            <span class="sheet-tag">SHEET A-002 · BUILD · SAMPLE</span>
-            <h1 class="sd-h1 medium">Workbench</h1>
-          </div>
-          <span class="sheet-tag" id="buildSubheader">1600 × 800 × 900 MM · 06 STEPS · 22 PARTS</span>
-        </div>
-
-        <div class="build-grid">
-          <!-- 3D Scene Viewport -->
-          <div class="bv-scene" id="bvScene">
-            <div class="bv-step-overlay">
-              <span class="bv-step-big" id="stepNoDisplay">01</span>
-              <span class="bv-step-total" id="totalStepsDisplay">/ 06</span>
-            </div>
-            <span class="bv-hint" aria-hidden="true">drag to turn it</span>
-
-            <div class="bv-world-center" aria-hidden="true">
-              <div class="bv-rig" id="bvRig">
-                <!-- 3D boxes dynamically populated by app.js -->
-              </div>
-            </div>
-
-            <div class="bv-legend" aria-hidden="true">
-              <span class="bv-legend-item"><span style="width: 12px; height: 12px; background: var(--pencil);"></span>NEW THIS STEP</span>
-              <span class="bv-legend-item"><span style="width: 12px; height: 12px; border: 1px solid var(--ink); box-sizing: border-box;"></span>ALREADY BUILT</span>
-            </div>
-
-            <div class="bv-controls">
-              <button type="button" class="bv-btn" id="turnLeftBtn" aria-label="Turn model left">
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"></path><path d="M4 9h10a6 6 0 010 12h-3"></path></svg>
-              </button>
-              <button type="button" class="bv-btn" id="resetViewBtn" aria-label="Reset view">
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
-              </button>
-              <button type="button" class="bv-btn" id="turnRightBtn" aria-label="Turn model right">
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"></path><path d="M20 9H10a6 6 0 000 12h3"></path></svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- Step Details Sidebar -->
-          <aside class="build-sidebar">
-            <div class="step-details-header">
-              <span class="step-num-badge" id="stepBadge">STEP 01</span>
-              <h2 class="step-title" id="stepTitle">Stand the legs</h2>
-              <p class="step-desc" id="stepDesc">Cut four legs to 900 mm. Stand them at the corners of a 1400 × 600 mm rectangle, measured to the outside faces.</p>
-            </div>
-
-            <div class="parts-table">
-              <span class="parts-table-title">PARTS FOR THIS STEP</span>
-              <div id="stepPartsList"></div>
-            </div>
-
-            <div class="step-nav-buttons">
-              <button type="button" class="sd-btn" id="prevStepBtn" disabled style="opacity: 0.4;">← Back</button>
-              <button type="button" class="sd-btn-solid" id="nextStepBtn" style="flex: 1 1 auto; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; text-transform: uppercase;">Next step →</button>
-            </div>
-
-            <div class="step-list-drawer" id="stepDrawerList"></div>
-          </aside>
-        </div>
-      </section>
-
-      <!-- ============ SHEET 03: PROJECTS ============ -->
-      <section class="sheet-container projects-sheet" id="sheet-projects" style="display: none;">
-        <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
-          <div class="sheet-header">
-            <span class="sheet-tag">SHEET A-003 · PROJECTS</span>
-            <h1 class="sd-h1 medium">Projects</h1>
-          </div>
-          <button type="button" class="sd-btn-solid" id="openNewProjectBtn">
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-            New project
-          </button>
-        </div>
-
-        <!-- Inline New Project Form -->
-        <div class="new-project-box" id="newProjectBox" style="display: none;">
-          <label for="newProjInput" style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.1em;">WHAT ARE YOU BUILDING?</label>
-          <div class="sd-field">
-            <input id="newProjInput" class="sd-input" type="text" placeholder="e.g. Raised garden bed" style="height: 44px; padding: 0 12px;">
-          </div>
-          <button type="button" class="sd-btn" id="addNewProjectBtn">Add</button>
-          <button type="button" class="sd-btn" id="cancelNewProjectBtn" style="border: 0;">Cancel</button>
-        </div>
-
-        <div class="projects-grid">
-          <!-- Default Sample Card: Workbench -->
-          <div class="project-card">
-            <div class="project-thumb">
-              <svg aria-hidden="true" width="80" height="54" viewBox="0 0 80 54" fill="none" stroke="#E8EEF7" stroke-width="1.4" stroke-linejoin="round"><path d="M6 16L46 6l28 8-40 11z"></path><path d="M6 16v4l28 9 40-11v-4"></path><path d="M10 21v28M30 28v24M70 19v26M50 13v4"></path><path d="M10 40l20 6 40-11"></path></svg>
-            </div>
-            <div class="project-body">
-              <span class="project-name">Workbench</span>
-              <div class="project-meta">
-                <span>SAMPLE</span><span>06 STEPS</span>
-              </div>
-              <button type="button" class="sd-btn-solid" id="openSampleProjectBtn" style="margin-top: 6px; width: 100%;">Open build</button>
-            </div>
-          </div>
-
-          <!-- User Created Projects Container -->
-          <div id="userProjectsList" style="display: contents;"></div>
-        </div>
-      </section>
-
-      <!-- ============ SHEET 04: FILES ============ -->
-      <section class="sheet-container files-sheet" id="sheet-files" style="display: none;">
-        <div class="sheet-header">
-          <span class="sheet-tag">SHEET A-004 · FILES</span>
-          <h1 class="sd-h1 medium">Files</h1>
-        </div>
-
-        <label class="sd-file-dropzone" id="fileDropzone" for="fileUploadInput">
-          <svg aria-hidden="true" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#E8EEF7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"></path><path d="M4 16v4h16v-4"></path></svg>
-          <span style="font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 600; text-transform: uppercase; color: #FFFFFF;">Choose files</span>
-          <span style="font-size: 14px;">Sketches, photos, measurements, existing plans</span>
-          <input id="fileUploadInput" class="sr-only" type="file" multiple>
-        </label>
-
-        <div id="uploadedFilesList" style="display: flex; flex-direction: column; border-top: 1px solid var(--ink);"></div>
-      </section>
-
-      <!-- ============ SHEET 05: HISTORY ============ -->
-      <section class="sheet-container history-sheet" id="sheet-history" style="display: none;">
-        <div class="sheet-header">
-          <span class="sheet-tag">SHEET A-005 · HISTORY</span>
-          <h1 class="sd-h1 medium">History</h1>
-        </div>
-
-        <div id="historyEmptyNotice" style="display: flex; flex-direction: column; gap: 6px; padding: 40px 0; border-top: 1px solid rgba(232, 238, 247, 0.5);">
-          <span style="font-family: 'Architects Daughter', cursive; font-size: 22px; color: var(--pencil);">no entries yet.</span>
-          <span style="font-size: 15px;">Every build you ask for in Chat is logged here with a time stamp.</span>
-        </div>
-
-        <div id="historyList" style="display: flex; flex-direction: column; border-top: 1px solid var(--ink);"></div>
-      </section>
-
-      <!-- ============ SHEET 06: ABOUT ============ -->
-      <section class="sheet-container about-sheet" id="sheet-about" style="display: none;">
-        <div class="sheet-header">
-          <span class="sheet-tag">SHEET A-006 · ABOUT</span>
-          <h1 class="sd-h1 medium">About</h1>
-        </div>
-        <p style="margin: 0; font-size: 21px; line-height: 1.5; color: #FFFFFF;">Builders Archive is a 3D modeling program that turns what you want to build into a step-by-step instruction set, like a model kit. Every step comes with a 3D model of exactly what to add next and the parts you need for it.</p>
-
-        <div class="about-grid">
-          <div class="about-card">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: var(--pencil);">01 · DESCRIBE</span>
-            <span style="font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 600; text-transform: uppercase; color: #FFFFFF;">Say what you want</span>
-            <span style="font-size: 14px; line-height: 1.5;">Type it in chat, add a sketch or measurements.</span>
-          </div>
-          <div class="about-card">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: var(--pencil);">02 · MODEL</span>
-            <span style="font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 600; text-transform: uppercase; color: #FFFFFF;">Get the 3D model</span>
-            <span style="font-size: 14px; line-height: 1.5;">The whole build, broken into parts with real sizes.</span>
-          </div>
-          <div class="about-card">
-            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; color: var(--pencil);">03 · BUILD</span>
-            <span style="font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 600; text-transform: uppercase; color: #FFFFFF;">Follow the steps</span>
-            <span style="font-size: 14px; line-height: 1.5;">One step at a time, new parts highlighted, turn it any way you need.</span>
-          </div>
-        </div>
-
-        <button type="button" class="sd-btn-solid" id="aboutSampleBtn" style="align-self: flex-start; font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700; text-transform: uppercase;">See a sample build</button>
-      </section>
-
-      <!-- ============ SHEET 07: SETTINGS ============ -->
-      <section class="sheet-container settings-sheet" id="sheet-settings" style="display: none;">
-        <div class="sheet-header">
-          <span class="sheet-tag">SHEET A-007 · SETTINGS</span>
-          <h1 class="sd-h1 medium">Settings</h1>
-        </div>
-
-        <div style="display: flex; flex-direction: column; border-top: 1px solid var(--ink);">
-          <div class="settings-row">
-            <span style="font-size: 16px; color: #FFFFFF;">Cursor glow</span>
-            <button type="button" class="sd-switch-track" id="glowToggleBtn" role="switch" aria-checked="true" aria-label="Cursor glow">
-              <span class="sd-switch-knob"></span>
+          <div class="flex items-center gap-2">
+            <button
+              id="chatMicBtn"
+              type="button"
+              class="p-2 rounded-full text-gray-400 hover:bg-white/10 transition"
+              aria-label="Voice input"
+            >
+              <!-- Mic icon (size 19) -->
+              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" x2="12" y1="19" y2="22"></line>
+              </svg>
+            </button>
+            <button
+              id="chatSendBtn"
+              type="button"
+              disabled
+              class="p-3 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              aria-label="Send message"
+            >
+              <!-- ArrowUp icon (size 19) -->
+              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m5 12 7-7 7 7"></path>
+                <path d="M12 19V5"></path>
+              </svg>
             </button>
           </div>
-
-          <div class="settings-row">
-            <span style="font-size: 16px; color: #FFFFFF;">Crosshair guides</span>
-            <button type="button" class="sd-switch-track" id="crossToggleBtn" role="switch" aria-checked="true" aria-label="Crosshair guides">
-              <span class="sd-switch-knob"></span>
-            </button>
-          </div>
-
-          <div class="settings-row" style="min-height: 72px;">
-            <span style="font-size: 16px; color: #FFFFFF;">Paper</span>
-            <div class="color-swatches" id="paperSwatches"></div>
-          </div>
-
-          <div class="settings-row" style="min-height: 72px;">
-            <span style="font-size: 16px; color: #FFFFFF;">Pencil (highlights new parts)</span>
-            <div class="color-swatches" id="pencilSwatches"></div>
-          </div>
-
-          <div class="settings-row">
-            <span style="font-size: 16px; color: #FFFFFF;">Clear chat and history</span>
-            <button type="button" class="sd-btn" id="clearAllBtn">Clear</button>
-          </div>
         </div>
-      </section>
+      </div>
+    </div>
+  </main>
 
-      <!-- DRAFTING TITLE BLOCK (BOTTOM-RIGHT) -->
-      <footer class="title-block" aria-label="Drawing Title Block">
-        <span class="title-block-heading">BUILDERS ARCHIVE</span>
-        <span class="title-cell" id="dwgDisplay">DWG A-001</span>
-        <span class="title-cell">SCALE 1:20</span>
-        <span class="title-cell last">REV 05</span>
-        <div class="title-block-foot">
-          <span>DRAWN</span>
-          <span class="title-signature">J.J.  11/21</span>
-        </div>
-      </footer>
-    </main>
+  <!-- Three.js (r128) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-  </div>
-
-  <!-- Standard Vanilla ES6+ Script -->
+  <!-- Traditional Vanilla JavaScript Application -->
   <script src="./js/app.js"></script>
 </body>
 </html>

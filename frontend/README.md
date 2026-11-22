@@ -1,51 +1,58 @@
 # Builders Archive — Traditional Web Tech Stack
 
-This directory contains the production-grade rebuild of **Builders Archive** using the traditional web tech stack (HTML5, CSS3, and vanilla ES6+ JavaScript).
+This directory contains the modernized **Builders Archive** frontend built with the traditional web design stack:
+- **HTML5:** Semantic, accessible markup.
+- **CSS3:** Custom styles adhering to Tailwind CSS conventions with smooth dark mode aesthetics.
+- **TypeScript & JavaScript (ES6+):** Robust component design, type-checked with TypeScript and running cleanly in modern browsers.
+- **Three.js:** Full 3D rendering stack ready for 3D build and parts visualization.
+- **React & Lucide:** `AIChatInput` React component implementation with Lucide icons.
+
+---
+
+## Clean Dark Architecture
+
+- **Black Background:** Pure minimalist `#000000` canvas with zero clutter (blueprint grids, rulers, sidebars, and title blocks removed).
+- **Centered AIChatInput:** Center-aligned modern chat input widget with:
+  - Multi-line textarea (`rows=2`, Enter to send, Shift+Enter for newlines).
+  - Plus attachment button (Lucide `Plus` 20px).
+  - Voice input button (Lucide `Mic` 19px).
+  - Send action button (Lucide `ArrowUp` 19px, auto-disables on empty input, hover feedback).
+  - Console logging on send: `console.log("Message sent:", message)`.
+
+---
 
 ## Tech Stack Overview
 
-- **HTML5:** Clean, semantic structure (`<nav>`, `<main>`, `<section>`, `<article>`, `<aside>`, `<footer>`) with full ARIA accessibility and zero proprietary design-tool tags.
-- **CSS3:**
-  - CSS Custom Properties (`--paper`, `--panel`, `--pencil`, `--ink`) for live theme switching.
-  - Hardware-accelerated 3D CSS transforms (`perspective: 1400px; transform-style: preserve-3d;`) for isometric 3D model rendering.
-  - Dual-grid technical blueprint backgrounds (`120px` major grid, `24px` minor grid).
-  - Responsive layout for desktop, tablet, and mobile.
-- **JavaScript (ES6+):** Modular, vanilla JavaScript with zero runtime libraries, build tools, or bundler requirements.
+1. **Standalone Traditional Web Stack (`frontend/`):**
+   - `frontend/index.html`: Entry point running directly in any browser or HTTP server without requiring a build step.
+   - `frontend/css/styles.css`: Pure CSS definitions for all styling classes.
+   - `frontend/js/app.js`: Event handling, dynamic textarea resizing, and Three.js initialization.
+
+2. **TypeScript & React Source (`src/`):**
+   - `src/AIChatInput.tsx`: Component source code with Lucide icons and React hooks.
+   - `src/App.tsx`: App wrapper centering the input on a black background.
+   - `src/three-scene.ts`: Three.js scene manager class for 3D model visualization.
+   - `src/main.tsx`: React DOM mount entry point.
 
 ---
 
-## Features & Parity
+## How to Run
 
-1. **Sheet Navigation (01 - 07):**
-   - **01 Chat:** Interactive prompt input, quick chips, conversation thread with action buttons, handwritten annotations.
-   - **02 Build:** Interactive 3D CSS Workbench model:
-     - Mouse drag to rotate the 3D model in 3D space (`rotateX`, `rotateY`).
-     - Turn Left, Turn Right, and Reset View controls.
-     - 6-step build sequence with highlighted new parts vs already built parts.
-     - Bill of materials / parts list table for each step.
-     - Clickable step drawer.
-   - **03 Projects:** Project grid, "New project" inline creation form, deep link to describe project in chat, remove project.
-   - **04 Files:** Drag-and-drop file upload zone, file picker, formatted sizes, file list with index badges (`F-01`).
-   - **05 History:** Timestamped prompt activity log with reverse-chronological order.
-   - **06 About:** System description, 3-step workflow grid, call to action.
-   - **07 Settings:** Cursor glow toggle switch, crosshair guides toggle switch, 4 Paper palette colors, 4 Pencil highlight colors, clear data.
-2. **Drafting Blueprint Visuals:**
-   - Real-time mouse crosshair guides tracking cursor coordinates.
-   - Radial cursor glow.
-   - Live technical rulers (horizontal ruler with dimension markings, vertical ruler with ticks).
-   - Live drafting coordinate readout (`X 0450  Y 0320`).
-   - Engineering Title Block (DWG, SCALE, REV, DRAWN signature) updating dynamically with active sheet.
+### Option 1: Open Directly in Browser
+Open `frontend/index.html` (or root `index.html`) directly in any web browser (`Chrome`, `Firefox`, `Safari`, `Edge`).
 
----
-
-## How to View and Run
-
-### Option 1: Using Python's Built-in HTTP Server
-From the repository root:
+### Option 2: Using Python HTTP Server
 ```bash
-python3 -m http.server -d frontend 8000
+python -m http.server -d frontend 8000
 ```
-Then open `http://localhost:8000` in any browser.
+Then visit `http://localhost:8000`.
 
-### Option 2: Open Directly in Browser
-You can also open `frontend/index.html` directly in any web browser (`Chrome`, `Firefox`, `Safari`, `Edge`). No local server is required.
+### Option 3: Using Vite / NPM
+```bash
+npm install
+npm run dev
+```
+For production build:
+```bash
+npm run build
+```
