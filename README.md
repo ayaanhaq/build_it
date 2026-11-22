@@ -10,8 +10,13 @@ A deterministic rule checker and instruction generator for physical electronics 
 
 ## Requirements & Setup
 
-- **Python 3.8+** (standard library only; no external dependencies required).
-- No network access or third-party packages are needed.
+- **Python 3.8+** (standard library only for the core rule checker; no external dependencies required).
+- Optional datasheet ingestion and schema validation tools utilize `pypdf` and `jsonschema` when available.
+
+### PDF Extraction Backends
+The datasheet ingestion module (`datasheet_ingest.py`) supports local PDF ingestion and SHA-256 provenance calculation:
+- **`pypdf`** (default, currently supported): Pure Python library for page extraction and document metadata.
+- **`PyMuPDF` (`fitz`)** / **`pdfplumber`**: Modular backend adapter stubs are implemented. Both remain pending user approval before being added as optional dependencies.
 
 ### Running Tests
 Run the full test suite with:
@@ -91,7 +96,8 @@ Each part entry contains:
 - **Documentation & Citations**:
   - Always include a `_comment` citing the datasheet source and value for each limit.
   - If a value cannot be verified from a reliable datasheet, set it to `"UNVERIFIED"` rather than guessing.
-  - When a limit like `max_source_ma` is `"UNVERIFIED"`, `checker.py` applies a conservative default placeholder (`DEFAULT_UNVERIFIED_MAX_SOURCE_MA = 8.0` mA) and issues a warning. Warnings do not fail the design unless the calculated current exceeds this conservative limit.
+  - **Fail-Closed Safety Rule**: If an absolute maximum rating on a GPIO pin (`max_source_ma`, `level`) or power pin (`v`, `max_source_ma`) is `"UNVERIFIED"`, `checker.py` rejects the design with a blocking error. Hardware safety requires verified limits for safety-critical MCU and power pins.
+  - For non-critical driver/sensor pins (e.g. `role: "output"` on a sensor or `max_sink_ma` on an input), `checker.py` applies a conservative default placeholder (`DEFAULT_UNVERIFIED_MAX_SOURCE_MA = 8.0` mA) and issues a warning. Warnings do not fail the design unless the calculated current exceeds this conservative limit.
 
 ### Example: Adding a Sensor
 ```json
