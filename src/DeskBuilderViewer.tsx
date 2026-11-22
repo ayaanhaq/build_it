@@ -6,28 +6,38 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCw,
-  CheckCircle2,
+  Layers,
 } from "lucide-react";
 
 interface DeskBuilderViewerProps {
   currentStep?: number;
   onStepChange?: (step: number) => void;
   showEmbeddedPartsCard?: boolean;
+  highlightedPartName?: string | null;
+  onPartSelected?: (partName: string) => void;
 }
 
 export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
   currentStep: externalStep,
   onStepChange: externalOnStepChange,
   showEmbeddedPartsCard = false,
+  highlightedPartName,
+  onPartSelected,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<ThreeDeskViewer | null>(null);
 
   const [internalStep, setInternalStep] = useState<number>(1);
   const currentStep = externalStep !== undefined ? externalStep : internalStep;
-  const [autoRotate, setAutoRotate] = useState<boolean>(false);
   const totalSteps = DESK_BUILD_STEPS.length;
   const activeStepData = DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
+
+  // Hover callout state (Pass 8 Analytical 2D Leader Callouts)
+  const [hoverCallout, setHoverCallout] = useState<{
+    name: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -35,6 +45,23 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
     const viewer = new ThreeDeskViewer({
       container: containerRef.current,
       initialStep: currentStep,
+      onPartHover: (partName, x, y) => {
+        if (partName) {
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (rect) {
+            setHoverCallout({
+              name: partName,
+              x: x - rect.left,
+              y: y - rect.top,
+            });
+          }
+        } else {
+          setHoverCallout(null);
+        }
+      },
+      onPartClick: (partName) => {
+        if (onPartSelected) onPartSelected(partName);
+      },
     });
     viewerRef.current = viewer;
 
@@ -51,6 +78,13 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
     }
   }, [externalStep]);
 
+  // Sync external part highlights
+  useEffect(() => {
+    if (viewerRef.current && highlightedPartName !== undefined) {
+      viewerRef.current.highlightPartByName(highlightedPartName);
+    }
+  }, [highlightedPartName]);
+
   const handleStepChange = (step: number) => {
     const clamped = Math.max(1, Math.min(step, totalSteps));
     if (externalOnStepChange) {
@@ -65,19 +99,6 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
 
   const handleNext = () => handleStepChange(currentStep + 1);
   const handlePrev = () => handleStepChange(currentStep - 1);
-
-  const handleToggleAutoRotate = () => {
-    if (viewerRef.current) {
-      const isAuto = viewerRef.current.toggleAutoRotate();
-      setAutoRotate(isAuto);
-    }
-  };
-
-  const handlePresetView = (view: "isometric" | "front" | "top" | "side" | "reset") => {
-    if (viewerRef.current) {
-      viewerRef.current.setPresetView(view);
-    }
-  };
 
   // Keyboard navigation
   useEffect(() => {
@@ -100,7 +121,24 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
         className="relative w-full flex-1 cursor-grab active:cursor-grabbing outline-none"
       />
 
-      {/* Embedded Lego Parts Callout (Optional - shown only when Right Widget is disabled) */}
+      {/* HeyClicky Analytical Leader Line Callout Capsule */}
+      {hoverCallout && (
+        <div
+          className="pointer-events-none absolute z-30 transform -translate-x-1/2 -translate-y-12 transition-all duration-75"
+          style={{ left: hoverCallout.x, top: hoverCallout.y }}
+        >
+          <div className="flex items-center gap-2 bg-[#18191c]/95 backdrop-blur-md border border-amber-400/50 px-3 py-1.5 rounded-full shadow-2xl">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span className="text-xs font-semibold text-white tracking-wide">
+              {hoverCallout.name}
+            </span>
+          </div>
+          {/* Subtle leader tick */}
+          <div className="w-[1.5px] h-3 bg-amber-400/80 mx-auto" />
+        </div>
+      )}
+
+      {/* Embedded Lego Parts Callout (Optional) */}
       {showEmbeddedPartsCard && (
         <LegoPartsCard
           step={activeStepData}
@@ -116,7 +154,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
             <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider inline-block mb-1 whitespace-nowrap">
               Step {currentStep} of {totalSteps}
             </span>
-            <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2 truncate">
+            <h3 className="text-base md:text-lg font-bold text-white truncate">
               {activeStepData.title}
             </h3>
             <p className="text-xs text-gray-400 line-clamp-2 mt-0.5">
@@ -124,7 +162,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+          <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-shrink-0">
             <button
               onClick={handlePrev}
               disabled={currentStep === 1}

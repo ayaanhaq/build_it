@@ -38,6 +38,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [rightWidgetOpen, setRightWidgetOpen] = useState<boolean>(true);
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [highlightedPartName, setHighlightedPartName] = useState<string | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const activeStepData = DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
@@ -250,6 +251,8 @@ export default function App() {
                           currentStep={currentStep}
                           onStepChange={(s) => setCurrentStep(s)}
                           showEmbeddedPartsCard={!rightWidgetOpen}
+                          highlightedPartName={highlightedPartName}
+                          onPartSelected={(name) => setHighlightedPartName(name)}
                         />
                       </div>
                     )}
@@ -281,6 +284,8 @@ export default function App() {
           isOpen={rightWidgetOpen}
           onToggle={() => setRightWidgetOpen((prev) => !prev)}
           onStepSelect={(step) => setCurrentStep(step)}
+          onPartHighlight={(name) => setHighlightedPartName(name)}
+          highlightedPartName={highlightedPartName}
         />
       )}
     </div>

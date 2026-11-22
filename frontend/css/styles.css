@@ -527,11 +527,74 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 0.85rem;
   padding: 0.6rem 0.85rem;
-  transition: background-color 0.15s ease;
+  transition: all 0.15s ease;
+  cursor: pointer;
 }
 
 .lego-part-item:hover {
   background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.lego-part-item.active-highlight {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+  transform: scale(1.02);
+}
+
+/* Analytical 2D Leader Callouts (Pass 8) */
+.leader-callout-capsule {
+  position: absolute;
+  pointer-events: none;
+  z-index: 25;
+  transform: translate(-50%, -130%);
+  transition: transform 0.08s ease-out, opacity 0.15s ease;
+}
+
+.callout-bubble {
+  background-color: rgba(20, 20, 22, 0.95);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 0 15px rgba(245, 158, 11, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.callout-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background-color: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  animation: pulse-dot 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.callout-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+
+.callout-pointer {
+  width: 8px;
+  height: 8px;
+  background-color: rgba(20, 20, 22, 0.95);
+  border-right: 1px solid rgba(245, 158, 11, 0.6);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.6);
+  transform: rotate(45deg);
+  margin: -4px auto 0 auto;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .qty-badge {

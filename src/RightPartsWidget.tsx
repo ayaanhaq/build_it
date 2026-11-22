@@ -3,11 +3,8 @@ import { BuildStep } from "./types";
 import {
   Layers,
   Wrench,
-  ChevronRight,
   PanelRightClose,
   PanelRightOpen,
-  CheckCircle2,
-  Box,
 } from "lucide-react";
 
 interface RightPartsWidgetProps {
@@ -17,6 +14,8 @@ interface RightPartsWidgetProps {
   isOpen: boolean;
   onToggle: () => void;
   onStepSelect?: (step: number) => void;
+  onPartHighlight?: (partName: string | null) => void;
+  highlightedPartName?: string | null;
 }
 
 export const RightPartsWidget: React.FC<RightPartsWidgetProps> = ({
@@ -26,6 +25,8 @@ export const RightPartsWidget: React.FC<RightPartsWidgetProps> = ({
   isOpen,
   onToggle,
   onStepSelect,
+  onPartHighlight,
+  highlightedPartName,
 }) => {
   if (!isOpen) {
     return (
@@ -108,35 +109,47 @@ export const RightPartsWidget: React.FC<RightPartsWidgetProps> = ({
           </div>
 
           <div className="space-y-2 max-h-[calc(100vh-390px)] overflow-y-auto pr-1">
-            {step.parts.map((part) => (
-              <div
-                key={part.id}
-                className="flex items-center justify-between bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl px-3 py-2.5 transition"
-              >
-                <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                  <span className="flex-shrink-0 bg-white/15 text-white font-mono font-bold text-xs px-2 py-0.5 rounded-md border border-white/10">
-                    {part.qty}
-                  </span>
+            {step.parts.map((part) => {
+              const isSelected =
+                highlightedPartName &&
+                part.name.toLowerCase().includes(highlightedPartName.toLowerCase());
 
-                  <div className="truncate">
-                    <p className="text-xs font-semibold text-white truncate">
-                      {part.name}
-                    </p>
-                    <p className="text-[10px] text-gray-400 font-mono truncate">
-                      {part.dimensions}
-                    </p>
+              return (
+                <div
+                  key={part.id}
+                  onClick={() => onPartHighlight && onPartHighlight(isSelected ? null : part.name)}
+                  className={`flex items-center justify-between border rounded-2xl px-3 py-2.5 cursor-pointer transition ${
+                    isSelected
+                      ? "bg-amber-500/20 border-amber-400/50 shadow-md scale-[1.02]"
+                      : "bg-white/5 hover:bg-white/10 border-white/5"
+                  }`}
+                  title="Click to locate in 3D viewport"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <span className="flex-shrink-0 bg-white/15 text-white font-mono font-bold text-xs px-2 py-0.5 rounded-md border border-white/10">
+                      {part.qty}
+                    </span>
+
+                    <div className="truncate">
+                      <p className="text-xs font-semibold text-white truncate">
+                        {part.name}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-mono truncate">
+                        {part.dimensions}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-white/30 shadow-sm"
+                      style={{ backgroundColor: part.color }}
+                      title={`${part.material} (${part.color})`}
+                    />
                   </div>
                 </div>
-
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <span
-                    className="w-3.5 h-3.5 rounded-full border border-white/30 shadow-sm"
-                    style={{ backgroundColor: part.color }}
-                    title={`${part.material} (${part.color})`}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

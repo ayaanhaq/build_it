@@ -83,13 +83,37 @@
     }
   ];
 
-  // 3D Desk Viewer Class
+  // HeyClicky-style REAL_TONES Palette (Physical technical palette)
+  const REAL_TONES = {
+    ink: 0x2c2e33,        // Deep Technical Outlines / Contours
+    white: 0xf7f8fa,      // Matte clean highlights / fittings
+    grey: 0x8e929a,       // Carbon steel / zinc expansion clips
+    tan: 0xb9946f,        // Natural Kiln-Dried White Oak
+    brown: 0x6d4a2f,      // Walnut core / drawer housing
+    sun: 0xd6a83c,        // Rubberized Brass leveling glides
+    coral: 0xb04838,      // Accent callout
+    steel: 0x222326,      // Matte Black Carbon Steel stretchers & trays
+    leather: 0x18191b,    // Charcoal desk mat
+    cream: 0xead9be,      // Beveled trim highlight
+  };
+
+  // 3D Desk Viewer Class (HeyClicky Multi-Pass Rendering Engine)
   class DeskViewer3D {
-    constructor(canvasContainer) {
+    constructor(canvasContainer, options = {}) {
       this.container = canvasContainer;
+      this.onPartHover = options.onPartHover || null;
+      this.onPartClick = options.onPartClick || null;
       this.currentStep = 1;
       this.stepGroups = new Map();
       this.animatedItems = [];
+      this.allInteractiveMeshes = [];
+      this.partMeshes = new Map();
+      this.hoveredMesh = null;
+      this.selectedMesh = null;
+      this.lastUserInteractTime = performance.now();
+
+      this.raycaster = new THREE.Raycaster();
+      this.mouseVec = new THREE.Vector2();
 
       this.target = new THREE.Vector3(0, 18, 0);
       this.dist = 95;
@@ -125,43 +149,60 @@
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.container.appendChild(this.renderer.domElement);
 
-      const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+      // Studio 3-Point Lighting (Pass 5)
+      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       this.scene.add(ambient);
 
-      const keyLight = new THREE.DirectionalLight(0xfff6e8, 1.3);
-      keyLight.position.set(40, 70, 50);
+      // Key light: warm sun high angle
+      const keyLight = new THREE.DirectionalLight(0xfff8f0, 1.35);
+      keyLight.position.set(45, 75, 45);
       keyLight.castShadow = true;
       keyLight.shadow.mapSize.width = 1024;
       keyLight.shadow.mapSize.height = 1024;
       keyLight.shadow.bias = -0.001;
       this.scene.add(keyLight);
 
-      const fillLight = new THREE.DirectionalLight(0xdde8ff, 0.6);
-      fillLight.position.set(-50, 40, -40);
+      // Fill light: cool ambient bounce
+      const fillLight = new THREE.DirectionalLight(0xdfebfa, 0.65);
+      fillLight.position.set(-50, 45, -40);
       this.scene.add(fillLight);
 
-      const rimLight = new THREE.DirectionalLight(0xffeedd, 0.8);
-      rimLight.position.set(0, 30, -60);
+      // Rim light: edge separation
+      const rimLight = new THREE.DirectionalLight(0xffeedd, 0.85);
+      rimLight.position.set(0, 35, -60);
       this.scene.add(rimLight);
 
+      // Ground plane shadow receiver
       const ground = new THREE.Mesh(
         new THREE.PlaneGeometry(300, 300),
-        new THREE.ShadowMaterial({ opacity: 0.35 })
+        new THREE.ShadowMaterial({ opacity: 0.4 })
       );
       ground.rotation.x = -Math.PI / 2;
+      ground.position.y = 0;
       ground.receiveShadow = true;
       this.scene.add(ground);
 
-      const platform = new THREE.Mesh(
-        new THREE.CylinderGeometry(60, 62, 0.4, 48),
-        new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.9, metalness: 0.1 })
+      // Presentation dais
+      const dais = new THREE.Mesh(
+        new THREE.CylinderGeometry(58, 60, 0.4, 48),
+        new THREE.MeshStandardMaterial({ color: 0x141417, roughness: 0.9, metalness: 0.1 })
       );
-      platform.position.y = -0.2;
-      platform.receiveShadow = true;
-      this.scene.add(platform);
+      dais.position.y = -0.2;
+      dais.receiveShadow = true;
+      this.scene.add(dais);
 
-      const grid = new THREE.GridHelper(100, 20, 0x2a2a30, 0x18181c);
-      grid.position.y = 0.01;
+      // Soft contact shadow disc
+      const contactDisc = new THREE.Mesh(
+        new THREE.CircleGeometry(42, 32),
+        new THREE.MeshBasicMaterial({ color: 0x050507, transparent: true, opacity: 0.5 })
+      );
+      contactDisc.rotation.x = -Math.PI / 2;
+      contactDisc.position.y = 0.01;
+      this.scene.add(contactDisc);
+
+      // Subtle technical grid
+      const grid = new THREE.GridHelper(90, 18, 0x25262c, 0x16171a);
+      grid.position.y = 0.02;
       this.scene.add(grid);
 
       this.buildGeometry();
@@ -172,29 +213,63 @@
       this.loop();
     }
 
-    buildGeometry() {
-      const oak = new THREE.MeshStandardMaterial({ color: 0xc49662, roughness: 0.35, metalness: 0.05 });
-      const brass = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.2, metalness: 0.85 });
-      const steel = new THREE.MeshStandardMaterial({ color: 0x242528, roughness: 0.4, metalness: 0.85 });
-      const walnut = new THREE.MeshStandardMaterial({ color: 0x6b4929, roughness: 0.4, metalness: 0.05 });
+    /**
+     * Adds HeyClicky-style technical ink outlines to geometry (Pass 2)
+     */
+    addInkOutlines(mesh, thresholdAngle = 24) {
+      const edges = new THREE.EdgesGeometry(mesh.geometry, thresholdAngle);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: REAL_TONES.ink,
+        linewidth: 1.5,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const lines = new THREE.LineSegments(edges, lineMat);
+      mesh.add(lines);
+    }
 
-      // Step 1: Legs
+    buildGeometry() {
+      const createMat = (color, roughness = 0.35, metalness = 0.05) =>
+        new THREE.MeshStandardMaterial({ color, roughness, metalness });
+
+      const oak = createMat(REAL_TONES.tan, 0.38, 0.04);
+      const brass = createMat(REAL_TONES.sun, 0.22, 0.88);
+      const steel = createMat(REAL_TONES.ink, 0.42, 0.82);
+      const walnut = createMat(REAL_TONES.brown, 0.42, 0.05);
+
+      const register = (mesh, name, category, group) => {
+        mesh.name = name;
+        mesh.userData = { partName: name, category: category };
+        this.addInkOutlines(mesh);
+        group.add(mesh);
+        this.allInteractiveMeshes.push(mesh);
+        this.partMeshes.set(name, mesh);
+      };
+
+      // Step 1: Legs + Glides
       const g1 = new THREE.Group();
       const lx = 35, lz = 18, lh = 32, lt = 2.4;
       const legGeo = new THREE.BoxGeometry(lt, lh, lt);
-      const glideGeo = new THREE.CylinderGeometry(1.2, 1.4, 0.8, 16);
+      const glideGeo = new THREE.CylinderGeometry(1.2, 1.4, 0.8, 24);
 
-      [[-lx, lz], [lx, lz], [-lx, -lz], [lx, -lz]].forEach(([x, z]) => {
-        const leg = new THREE.Mesh(legGeo, oak);
+      const legCoords = [
+        [-lx, lz, "Front-Left Leg Post"],
+        [lx, lz, "Front-Right Leg Post"],
+        [-lx, -lz, "Rear-Left Leg Post"],
+        [lx, -lz, "Rear-Right Leg Post"],
+      ];
+
+      legCoords.forEach(([x, z, name]) => {
+        const leg = new THREE.Mesh(legGeo, oak.clone());
         leg.position.set(x, lh / 2 + 0.8, z);
         leg.castShadow = true;
         leg.receiveShadow = true;
-        g1.add(leg);
+        register(leg, name, "Solid Oak Leg Posts", g1);
 
-        const glide = new THREE.Mesh(glideGeo, brass);
+        const glide = new THREE.Mesh(glideGeo, brass.clone());
         glide.position.set(x, 0.4, z);
         glide.castShadow = true;
-        g1.add(glide);
+        register(glide, `${name} Brass Glide`, "Brass Leveling Glides", g1);
       });
       this.stepGroups.set(1, g1);
       this.scene.add(g1);
@@ -202,84 +277,107 @@
       // Step 2: Side Aprons
       const g2 = new THREE.Group();
       const sideApronGeo = new THREE.BoxGeometry(1.6, 4.0, lz * 2 - lt);
-      const leftApron = new THREE.Mesh(sideApronGeo, oak);
+
+      const leftApron = new THREE.Mesh(sideApronGeo, oak.clone());
       leftApron.position.set(-lx, lh - 2 + 0.8, 0);
       leftApron.castShadow = true;
-      g2.add(leftApron);
+      leftApron.receiveShadow = true;
+      register(leftApron, "Left Side Apron Rail", "Side Apron Rails", g2);
 
-      const rightApron = new THREE.Mesh(sideApronGeo, oak);
+      const rightApron = new THREE.Mesh(sideApronGeo, oak.clone());
       rightApron.position.set(lx, lh - 2 + 0.8, 0);
       rightApron.castShadow = true;
-      g2.add(rightApron);
+      rightApron.receiveShadow = true;
+      register(rightApron, "Right Side Apron Rail", "Side Apron Rails", g2);
+
       this.stepGroups.set(2, g2);
       this.scene.add(g2);
 
-      // Step 3: Main Stretchers & Brackets
+      // Step 3: Main Stretchers & Steel Corner Gussets
       const g3 = new THREE.Group();
       const frontBackGeo = new THREE.BoxGeometry(lx * 2 - lt, 4.0, 1.6);
-      const rear = new THREE.Mesh(frontBackGeo, oak);
+
+      const rear = new THREE.Mesh(frontBackGeo, oak.clone());
       rear.position.set(0, lh - 2 + 0.8, -lz);
       rear.castShadow = true;
-      g3.add(rear);
+      rear.receiveShadow = true;
+      register(rear, "Rear Longitudinal Stretcher", "Longitudinal Stretchers", g3);
 
-      const front = new THREE.Mesh(frontBackGeo, oak);
+      const front = new THREE.Mesh(frontBackGeo, oak.clone());
       front.position.set(0, lh - 2 + 0.8, lz);
       front.castShadow = true;
-      g3.add(front);
+      front.receiveShadow = true;
+      register(front, "Front Longitudinal Stretcher", "Longitudinal Stretchers", g3);
 
       const brkGeo = new THREE.BoxGeometry(2.5, 2.5, 0.4);
-      [[-lx + 2.5, lh - 2, lz - 1.2], [lx - 2.5, lh - 2, lz - 1.2], [-lx + 2.5, lh - 2, -lz + 1.2], [lx - 2.5, lh - 2, -lz + 1.2]].forEach(([bx, by, bz]) => {
-        const b = new THREE.Mesh(brkGeo, steel);
+      const gussets = [
+        [-lx + 2.5, lh - 2, lz - 1.2, "Front-Left Corner Gusset"],
+        [lx - 2.5, lh - 2, lz - 1.2, "Front-Right Corner Gusset"],
+        [-lx + 2.5, lh - 2, -lz + 1.2, "Rear-Left Corner Gusset"],
+        [lx - 2.5, lh - 2, -lz + 1.2, "Rear-Right Corner Gusset"],
+      ];
+      gussets.forEach(([bx, by, bz, name]) => {
+        const b = new THREE.Mesh(brkGeo, steel.clone());
         b.position.set(bx, by, bz);
-        g3.add(b);
+        register(b, name, "Steel Corner Gussets", g3);
       });
       this.stepGroups.set(3, g3);
       this.scene.add(g3);
 
-      // Step 4: Desktop Slab
+      // Step 4: Solid Oak Desktop Slab with Beveled Trim
       const g4 = new THREE.Group();
-      const desktopGeo = new THREE.BoxGeometry(84, 2.0, 46);
-      const deskTop = new THREE.Mesh(desktopGeo, new THREE.MeshStandardMaterial({ color: 0xd2a46c, roughness: 0.3, metalness: 0.05 }));
+      const topWidth = 84, topDepth = 46, topThick = 2.0;
+      const desktopGeo = new THREE.BoxGeometry(topWidth, topThick, topDepth);
+      const deskTop = new THREE.Mesh(desktopGeo, createMat(REAL_TONES.tan, 0.3, 0.04));
       deskTop.position.set(0, lh + 1.8, 0);
       deskTop.castShadow = true;
       deskTop.receiveShadow = true;
-      g4.add(deskTop);
+      register(deskTop, "Solid Oak Desktop Slab (1200x700mm)", "Solid Oak Desktop Surface", g4);
+
+      const trimGeo = new THREE.BoxGeometry(topWidth + 0.2, 0.15, topDepth + 0.2);
+      const trim = new THREE.Mesh(trimGeo, createMat(REAL_TONES.cream, 0.2, 0.02));
+      trim.position.set(0, lh + topThick + 0.8, 0);
+      register(trim, "Chamfered Tabletop Bevel", "Solid Oak Desktop Surface", g4);
+
       this.stepGroups.set(4, g4);
       this.scene.add(g4);
 
-      // Step 5: Drawer Unit
+      // Step 5: Under-Desk Drawer Unit Module
       const g5 = new THREE.Group();
-      const casing = new THREE.Mesh(new THREE.BoxGeometry(16, 6, 26), oak);
+      const casing = new THREE.Mesh(new THREE.BoxGeometry(16, 6, 26), oak.clone());
       casing.position.set(lx - 11, lh - 3 + 0.8, 2);
       casing.castShadow = true;
-      g5.add(casing);
+      register(casing, "Suspended Drawer Housing Casing", "Drawer Enclosure Housing", g5);
 
-      const drawer = new THREE.Mesh(new THREE.BoxGeometry(14.8, 4.8, 1), walnut);
-      drawer.position.set(lx - 11, lh - 3 + 0.8, 15.2);
-      drawer.castShadow = true;
-      g5.add(drawer);
+      const drawerFace = new THREE.Mesh(new THREE.BoxGeometry(14.8, 4.8, 1), walnut.clone());
+      drawerFace.position.set(lx - 11, lh - 3 + 0.8, 15.2);
+      drawerFace.castShadow = true;
+      register(drawerFace, "Walnut Dovetail Drawer Face", "Dovetailed Drawer Box", g5);
 
-      const handle = new THREE.Mesh(new THREE.BoxGeometry(6, 0.6, 0.8), steel);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(6, 0.6, 0.8), steel.clone());
       handle.position.set(lx - 11, lh - 3 + 0.8, 16.1);
-      g5.add(handle);
+      register(handle, "Anodized Black Pull Handle", "Anodized Pull Handle", g5);
+
       this.stepGroups.set(5, g5);
       this.scene.add(g5);
 
-      // Step 6: Tray & Accessories
+      // Step 6: Cable Management Raceway & Full-Grain Leather Pad
       const g6 = new THREE.Group();
-      const tray = new THREE.Mesh(new THREE.BoxGeometry(42, 3, 5), steel);
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(42, 3, 5), steel.clone());
       tray.position.set(-6, lh - 4 + 0.8, -lz + 4);
       tray.castShadow = true;
-      g6.add(tray);
+      register(tray, "Under-Desk Steel Cable Raceway", "Under-Desk Cable Raceway", g6);
 
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(44, 0.2, 24), new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.85, metalness: 0.1 }));
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(44, 0.2, 24), createMat(REAL_TONES.ink, 0.85, 0.1));
       pad.position.set(-4, lh + 2.9, 2);
-      g6.add(pad);
+      pad.receiveShadow = true;
+      register(pad, "Full-Grain Leather Desk Pad", "Full-Grain Leather Desk Pad", g6);
 
-      const book = new THREE.Mesh(new THREE.BoxGeometry(9, 0.4, 13), new THREE.MeshStandardMaterial({ color: 0x8a3324, roughness: 0.6 }));
+      const book = new THREE.Mesh(new THREE.BoxGeometry(9, 0.4, 13), createMat(REAL_TONES.coral, 0.6, 0.05));
       book.position.set(10, lh + 3.1, 2);
       book.rotation.y = -0.15;
-      g6.add(book);
+      register(book, "Hardbound Designer Notebook", "Full-Grain Leather Desk Pad", g6);
+
       this.stepGroups.set(6, g6);
       this.scene.add(g6);
     }
@@ -316,6 +414,82 @@
       }
     }
 
+    performPicking(clientX, clientY) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      this.mouseVec.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouseVec.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+      this.raycaster.setFromCamera(this.mouseVec, this.camera);
+      const visibleMeshes = this.allInteractiveMeshes.filter(m => m.parent && m.parent.visible);
+      const hits = this.raycaster.intersectObjects(visibleMeshes, false);
+
+      if (hits.length > 0) {
+        const topHit = hits[0].object;
+        if (this.hoveredMesh !== topHit) {
+          if (this.hoveredMesh && this.hoveredMesh !== this.selectedMesh) {
+            if (this.hoveredMesh.material && this.hoveredMesh.material.emissive) {
+              this.hoveredMesh.material.emissive.setHex(0x000000);
+            }
+          }
+          this.hoveredMesh = topHit;
+          if (this.hoveredMesh !== this.selectedMesh) {
+            if (this.hoveredMesh.material && this.hoveredMesh.material.emissive) {
+              this.hoveredMesh.material.emissive.setHex(0x221a00);
+            }
+          }
+        }
+        this.renderer.domElement.style.cursor = 'pointer';
+        if (this.onPartHover) {
+          this.onPartHover(topHit.name, clientX, clientY, topHit.userData.category);
+        }
+      } else {
+        if (this.hoveredMesh) {
+          if (this.hoveredMesh !== this.selectedMesh) {
+            if (this.hoveredMesh.material && this.hoveredMesh.material.emissive) {
+              this.hoveredMesh.material.emissive.setHex(0x000000);
+            }
+          }
+          this.hoveredMesh = null;
+        }
+        this.renderer.domElement.style.cursor = 'grab';
+        if (this.onPartHover) {
+          this.onPartHover(null, 0, 0, null);
+        }
+      }
+    }
+
+    highlightPartByName(name) {
+      if (!name) {
+        this.allInteractiveMeshes.forEach(mesh => {
+          if (mesh.material && mesh.material.emissive) {
+            mesh.material.emissive.setHex(0x000000);
+          }
+        });
+        this.selectedMesh = null;
+        return;
+      }
+
+      const q = name.toLowerCase();
+      let firstMatched = null;
+
+      this.allInteractiveMeshes.forEach(mesh => {
+        const mName = (mesh.name || '').toLowerCase();
+        const mCat = (mesh.userData?.category || '').toLowerCase();
+        const isMatch = mName.includes(q) || mCat.includes(q) || q.includes(mName) || q.includes(mCat);
+
+        if (mesh.material && mesh.material.emissive) {
+          if (isMatch) {
+            mesh.material.emissive.setHex(0x3a2800);
+            if (!firstMatched) firstMatched = mesh;
+          } else {
+            mesh.material.emissive.setHex(0x000000);
+          }
+        }
+      });
+
+      this.selectedMesh = firstMatched;
+    }
+
     setPreset(name) {
       if (name === 'iso') {
         this.targetDist = 95; this.targetPhi = 1.05; this.targetTheta = 0.75;
@@ -338,6 +512,7 @@
       const el = this.renderer.domElement;
 
       el.addEventListener('pointerdown', (e) => {
+        this.lastUserInteractTime = performance.now();
         this.isPointerDown = true;
         this.pointerMode = e.button === 2 ? 'pan' : 'rotate';
         this.prevPointer = { x: e.clientX, y: e.clientY };
@@ -345,7 +520,11 @@
       });
 
       el.addEventListener('pointermove', (e) => {
-        if (!this.isPointerDown) return;
+        if (!this.isPointerDown) {
+          this.performPicking(e.clientX, e.clientY);
+          return;
+        }
+        this.lastUserInteractTime = performance.now();
         const dx = e.clientX - this.prevPointer.x;
         const dy = e.clientY - this.prevPointer.y;
         this.prevPointer = { x: e.clientX, y: e.clientY };
@@ -371,13 +550,24 @@
       el.addEventListener('pointercancel', onUp);
       el.addEventListener('contextmenu', (e) => e.preventDefault());
 
+      el.addEventListener('click', () => {
+        if (this.hoveredMesh) {
+          const name = this.hoveredMesh.name;
+          const cat = this.hoveredMesh.userData?.category;
+          this.highlightPartByName(name);
+          if (this.onPartClick) this.onPartClick(name, cat);
+        }
+      });
+
       el.addEventListener('wheel', (e) => {
         e.preventDefault();
+        this.lastUserInteractTime = performance.now();
         this.targetDist = Math.max(30, Math.min(220, this.targetDist + e.deltaY * 0.08));
       }, { passive: false });
 
       // Pinch zoom
       el.addEventListener('touchstart', (e) => {
+        this.lastUserInteractTime = performance.now();
         if (e.touches.length === 2) {
           this.pinchDist = Math.hypot(
             e.touches[0].clientX - e.touches[1].clientX,
@@ -389,6 +579,7 @@
       el.addEventListener('touchmove', (e) => {
         if (e.touches.length === 2) {
           e.preventDefault();
+          this.lastUserInteractTime = performance.now();
           const d = Math.hypot(
             e.touches[0].clientX - e.touches[1].clientX,
             e.touches[0].clientY - e.touches[1].clientY
@@ -424,15 +615,20 @@
     loop() {
       requestAnimationFrame(this.loop);
 
+      const now = performance.now();
+      const isIdle = !this.isPointerDown && now - this.lastUserInteractTime > 1200;
+
+      // Resting sway (CANVAS_3D_CUT_SWAY): yaw sinusoidal sway keeps 3D depth perception alive
+      let currentTargetTheta = this.targetTheta;
+      if (isIdle) {
+        currentTargetTheta += Math.sin(now * 0.0008) * 0.035;
+      }
+
       this.dist += (this.targetDist - this.dist) * 0.08;
       this.phi += (this.targetPhi - this.phi) * 0.08;
-      if (this.autoRotate && !this.isPointerDown) {
-        this.targetTheta += 0.004;
-      }
-      this.theta += (this.targetTheta - this.theta) * 0.08;
+      this.theta += (currentTargetTheta - this.theta) * 0.08;
       this.updateCam();
 
-      const now = performance.now();
       for (let i = this.animatedItems.length - 1; i >= 0; i--) {
         const item = this.animatedItems[i];
         const t = Math.min(1, (now - item.start) / item.duration);
@@ -469,6 +665,7 @@
   let currentStepIndex = 1;
   let sidebarOpen = true;
   let rightWidgetOpen = true;
+  let activeSelectedPart = null;
 
   // Render Sidebar Chats
   function renderSidebarSessions() {
@@ -507,6 +704,21 @@
       `;
     });
     listEl.innerHTML = html;
+  }
+
+  // Highlights matching rows in the right-side Bill of Materials
+  function highlightPartsListRow(name) {
+    const partsListEl = document.getElementById('rightPartsList');
+    if (!partsListEl) return;
+    const items = partsListEl.querySelectorAll('.lego-part-item');
+    items.forEach((it) => {
+      const pName = it.getAttribute('data-part-name') || '';
+      if (name && (pName.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(pName.toLowerCase()))) {
+        it.classList.add('active-highlight');
+      } else if (!activeSelectedPart || it.getAttribute('data-part-name') !== activeSelectedPart) {
+        it.classList.remove('active-highlight');
+      }
+    });
   }
 
   // Render Right Parts Callout Widget
@@ -548,8 +760,12 @@
     if (partsListEl) {
       let partsHtml = '';
       step.parts.forEach((p) => {
+        const isSelected = activeSelectedPart && (
+          p.name.toLowerCase().includes(activeSelectedPart.toLowerCase()) ||
+          activeSelectedPart.toLowerCase().includes(p.name.toLowerCase())
+        );
         partsHtml += `
-          <div class="lego-part-item">
+          <div class="lego-part-item ${isSelected ? 'active-highlight' : ''}" data-part-name="${p.name}">
             <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
               <span class="qty-badge">${p.qty}</span>
               <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -562,12 +778,44 @@
         `;
       });
       partsListEl.innerHTML = partsHtml;
+
+      // Bidirectional Selection: clicking or hovering on part in list highlights 3D part
+      const items = partsListEl.querySelectorAll('.lego-part-item');
+      items.forEach((item) => {
+        const pName = item.getAttribute('data-part-name');
+        item.addEventListener('click', () => {
+          if (activeSelectedPart === pName) {
+            activeSelectedPart = null;
+            item.classList.remove('active-highlight');
+            if (deskViewerInstance) deskViewerInstance.highlightPartByName(null);
+          } else {
+            activeSelectedPart = pName;
+            items.forEach((it) => it.classList.remove('active-highlight'));
+            item.classList.add('active-highlight');
+            if (deskViewerInstance) deskViewerInstance.highlightPartByName(pName);
+          }
+        });
+
+        item.addEventListener('mouseenter', () => {
+          if (!activeSelectedPart && deskViewerInstance) {
+            deskViewerInstance.highlightPartByName(pName);
+          }
+        });
+
+        item.addEventListener('mouseleave', () => {
+          if (!activeSelectedPart && deskViewerInstance) {
+            deskViewerInstance.highlightPartByName(null);
+          }
+        });
+      });
     }
   }
 
   function updateStepUI(stepNum) {
     currentStepIndex = stepNum;
+    activeSelectedPart = null;
     if (deskViewerInstance) {
+      deskViewerInstance.highlightPartByName(null);
       deskViewerInstance.setStep(stepNum);
     }
 
@@ -610,7 +858,34 @@
     const canvasBox = document.getElementById('desk3DCanvas');
     if (!canvasBox || deskViewerInstance) return;
 
-    deskViewerInstance = new DeskViewer3D(canvasBox);
+    // HeyClicky-style interactive viewport with raycasting & leader callouts
+    deskViewerInstance = new DeskViewer3D(canvasBox, {
+      onPartHover: (partName, clientX, clientY, category) => {
+        const calloutEl = document.getElementById('leaderCalloutCapsule');
+        const calloutTextEl = document.getElementById('calloutPartName');
+
+        if (partName && calloutEl && calloutTextEl) {
+          const rect = canvasBox.getBoundingClientRect();
+          calloutTextEl.textContent = partName;
+          calloutEl.style.left = `${clientX - rect.left}px`;
+          calloutEl.style.top = `${clientY - rect.top}px`;
+          calloutEl.style.display = 'block';
+
+          highlightPartsListRow(category || partName);
+        } else if (calloutEl) {
+          calloutEl.style.display = 'none';
+          if (!activeSelectedPart) {
+            highlightPartsListRow(null);
+          }
+        }
+      },
+      onPartClick: (partName, category) => {
+        const target = category || partName;
+        activeSelectedPart = (activeSelectedPart === target) ? null : target;
+        highlightPartsListRow(activeSelectedPart);
+      }
+    });
+
     updateStepUI(1);
 
     // Prev / Next controls
