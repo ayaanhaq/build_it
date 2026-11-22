@@ -6,24 +6,28 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCw,
-  Eye,
-  Maximize2,
-  HelpCircle,
   CheckCircle2,
 } from "lucide-react";
 
 interface DeskBuilderViewerProps {
-  onClose?: () => void;
+  currentStep?: number;
+  onStepChange?: (step: number) => void;
+  showEmbeddedPartsCard?: boolean;
 }
 
-export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
+export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
+  currentStep: externalStep,
+  onStepChange: externalOnStepChange,
+  showEmbeddedPartsCard = false,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<ThreeDeskViewer | null>(null);
 
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [internalStep, setInternalStep] = useState<number>(1);
+  const currentStep = externalStep !== undefined ? externalStep : internalStep;
   const [autoRotate, setAutoRotate] = useState<boolean>(false);
   const totalSteps = DESK_BUILD_STEPS.length;
-  const activeStepData = DESK_BUILD_STEPS[currentStep - 1];
+  const activeStepData = DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -40,11 +44,22 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
     };
   }, []);
 
+  // Sync external step changes
+  useEffect(() => {
+    if (viewerRef.current && externalStep !== undefined) {
+      viewerRef.current.setStep(externalStep);
+    }
+  }, [externalStep]);
+
   const handleStepChange = (step: number) => {
     const clamped = Math.max(1, Math.min(step, totalSteps));
-    setCurrentStep(clamped);
-    if (viewerRef.current) {
-      viewerRef.current.setStep(clamped);
+    if (externalOnStepChange) {
+      externalOnStepChange(clamped);
+    } else {
+      setInternalStep(clamped);
+      if (viewerRef.current) {
+        viewerRef.current.setStep(clamped);
+      }
     }
   };
 
@@ -78,19 +93,21 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
   }, [currentStep]);
 
   return (
-    <div className="relative w-full h-[640px] md:h-[720px] rounded-3xl overflow-hidden border border-white/15 bg-[#0a0a0c] shadow-2xl flex flex-col transition-all">
+    <div className="relative w-full h-[600px] md:h-[680px] rounded-3xl overflow-hidden border border-white/15 bg-[#0a0a0c] shadow-2xl flex flex-col transition-all">
       {/* 3D Canvas Viewport */}
       <div
         ref={containerRef}
         className="relative w-full flex-1 cursor-grab active:cursor-grabbing outline-none"
       />
 
-      {/* Floating Lego-style Parts Callout (Top-Left) */}
-      <LegoPartsCard
-        step={activeStepData}
-        currentStepIndex={currentStep}
-        totalSteps={totalSteps}
-      />
+      {/* Embedded Lego Parts Callout (Optional - shown only when Right Widget is disabled) */}
+      {showEmbeddedPartsCard && (
+        <LegoPartsCard
+          step={activeStepData}
+          currentStepIndex={currentStep}
+          totalSteps={totalSteps}
+        />
+      )}
 
       {/* View Presets & Controls (Top-Right) */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 bg-[#18191c]/90 backdrop-blur-md border border-white/15 p-1.5 rounded-2xl shadow-xl">
@@ -136,7 +153,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
         </button>
       </div>
 
-      {/* Mouse Interaction Hint Badge */}
+      {/* Interaction Hint Badge */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none hidden md:flex items-center gap-2 bg-black/60 backdrop-blur-sm border border-white/10 text-gray-400 text-[11px] px-3 py-1 rounded-full">
         <span>Drag to rotate</span>
         <span>•</span>
@@ -181,7 +198,6 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
 
         {/* Step Title & Controls Row */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          {/* Step Text Info */}
           <div className="flex-1 min-w-0 pr-4">
             <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2 truncate">
               {activeStepData.title}
@@ -191,7 +207,6 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = () => {
             </p>
           </div>
 
-          {/* Prev / Next Flipping Buttons */}
           <div className="flex items-center gap-3 w-full md:w-auto justify-end">
             <button
               onClick={handlePrev}

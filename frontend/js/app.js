@@ -1,6 +1,6 @@
 /**
  * Builders Archive — Traditional Web Tech Stack
- * Clean ES6+ JavaScript & Three.js 3D Lego-Style Desk Manual Implementation
+ * Multi-Session Chat Sidebar · 3D Desk Assembly · Right-Side Parts Callout Widget
  */
 
 (function () {
@@ -91,7 +91,6 @@
       this.stepGroups = new Map();
       this.animatedItems = [];
 
-      // Orbit state
       this.target = new THREE.Vector3(0, 18, 0);
       this.dist = 95;
       this.phi = 1.05;
@@ -113,15 +112,12 @@
       const w = this.container.clientWidth || 800;
       const h = this.container.clientHeight || 500;
 
-      // Scene
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x0a0a0c);
 
-      // Camera
       this.camera = new THREE.PerspectiveCamera(40, w / h, 0.5, 1000);
       this.updateCam();
 
-      // Renderer
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       this.renderer.setSize(w, h);
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -129,7 +125,6 @@
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.container.appendChild(this.renderer.domElement);
 
-      // Lights
       const ambient = new THREE.AmbientLight(0xffffff, 0.65);
       this.scene.add(ambient);
 
@@ -149,7 +144,6 @@
       rimLight.position.set(0, 30, -60);
       this.scene.add(rimLight);
 
-      // Ground
       const ground = new THREE.Mesh(
         new THREE.PlaneGeometry(300, 300),
         new THREE.ShadowMaterial({ opacity: 0.35 })
@@ -170,13 +164,9 @@
       grid.position.y = 0.01;
       this.scene.add(grid);
 
-      // Build Geometry
       this.buildGeometry();
-
-      // Interactions
       this.bindControls();
 
-      // Render Loop
       this.setStep(1, false);
       this.loop = this.loop.bind(this);
       this.loop();
@@ -442,7 +432,6 @@
       this.theta += (this.targetTheta - this.theta) * 0.08;
       this.updateCam();
 
-      // Step animations
       const now = performance.now();
       for (let i = this.animatedItems.length - 1; i >= 0; i--) {
         const item = this.animatedItems[i];
@@ -459,48 +448,121 @@
     }
   }
 
-  // --- UI Controller & Chat Logic ---
+  // --- Session & Sidebar State Management ---
+  let chatSessions = [
+    {
+      id: "session-1",
+      title: "Executive Oak Desk",
+      preview: "Hey I want to build a desk",
+      timestamp: "Today",
+      has3D: true,
+      currentStep: 1,
+      messages: [
+        { sender: "user", text: "Hey I want to build a desk" },
+        { sender: "assistant", text: "Here is your step-by-step 3D assembly manual for the Modern Solid Oak Desk (1200 × 700 × 750 mm). The parts required for your current step are displayed in the Parts Callout widget on the right. You can click & drag to rotate 360°, scroll/pinch to zoom, and flip through each step like a Lego manual." }
+      ]
+    }
+  ];
+
+  let activeSessionId = "session-1";
   let deskViewerInstance = null;
   let currentStepIndex = 1;
+  let sidebarOpen = true;
+  let rightWidgetOpen = true;
 
-  function renderLegoCard(step) {
-    const cardEl = document.getElementById('legoCardContainer');
-    if (!cardEl) return;
+  // Render Sidebar Chats
+  function renderSidebarSessions() {
+    const listEl = document.getElementById('chatSessionsList');
+    const countEl = document.getElementById('chatCountDisplay');
+    if (!listEl) return;
 
-    let partsHtml = '';
-    step.parts.forEach((p) => {
-      partsHtml += `
-        <div class="lego-part-item">
-          <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
-            <span class="qty-badge">${p.qty}</span>
+    if (countEl) countEl.textContent = chatSessions.length;
+
+    if (chatSessions.length === 0) {
+      listEl.innerHTML = `
+        <div style="text-align: center; padding: 24px 12px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 16px; color: #6b7280; font-size: 12px;">
+          <p style="margin: 0;">No chat history yet.</p>
+          <p style="margin: 4px 0 0 0; font-size: 10px; color: #4b5563;">Start by asking for a build!</p>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    chatSessions.forEach((s) => {
+      const isActive = s.id === activeSessionId;
+      html += `
+        <div class="chat-item ${isActive ? 'active' : ''}" data-id="${s.id}">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${isActive ? '#f59e0b' : '#6b7280'}" stroke-width="2" style="flex-shrink: 0;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              <p style="font-size: 12px; font-weight: 600; color: #ffffff; margin: 0;">${p.name}</p>
-              <p style="font-size: 10px; color: #9ca3af; font-family: monospace; margin: 0;">${p.dim}</p>
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${s.title}</div>
+              <div style="font-size: 10px; color: #6b7280; font-family: monospace;">${s.timestamp}</div>
             </div>
           </div>
-          <span style="width: 14px; height: 14px; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.3); background-color: ${p.color}; flex-shrink: 0;" title="${p.mat}"></span>
+          <button type="button" class="delete-btn" data-delete-id="${s.id}" title="Delete Chat">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
         </div>
       `;
     });
+    listEl.innerHTML = html;
+  }
 
-    cardEl.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="lego-step-badge">STEP ${step.stepNumber}</span>
-          <span style="font-size: 12px; color: #9ca3af;">of ${DESK_STEPS.length}</span>
-        </div>
-        <span style="font-size: 10px; font-family: monospace; letter-spacing: 0.08em; color: #f59e0b; text-transform: uppercase;">PARTS CALLOUT</span>
-      </div>
-      <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
-        <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.05em; color: #9ca3af; text-transform: uppercase;">Required for this step:</span>
-        ${partsHtml}
-      </div>
-      ${step.tip ? `
-        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 11px; color: #9ca3af;">
-          <strong style="color: #f59e0b;">Tip: </strong>${step.tip}
-        </div>
-      ` : ''}
-    `;
+  // Render Right Parts Callout Widget
+  function renderRightPartsWidget(step) {
+    const widgetEl = document.getElementById('rightPartsWidget');
+    const partsListEl = document.getElementById('rightPartsList');
+    const badgeEl = document.getElementById('rightStepBadge');
+    const titleEl = document.getElementById('rightStepTitle');
+    const descEl = document.getElementById('rightStepDesc');
+    const tipEl = document.getElementById('rightTipDisplay');
+    const progressEl = document.getElementById('rightProgressBar');
+    const progressTextEl = document.getElementById('rightProgressText');
+
+    if (!widgetEl) return;
+
+    const percent = Math.round((step.stepNumber / DESK_STEPS.length) * 100);
+    if (badgeEl) badgeEl.textContent = `STEP ${step.stepNumber}`;
+    if (progressEl) progressEl.style.width = `${percent}%`;
+    if (progressTextEl) progressTextEl.textContent = `${percent}% Complete`;
+    if (titleEl) titleEl.textContent = step.title;
+    if (descEl) descEl.textContent = step.description;
+
+    if (tipEl) {
+      if (step.tip) {
+        tipEl.innerHTML = `
+          <div style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 12px; padding: 10px; font-size: 11px; color: #d1d5db; display: flex; gap: 8px; align-items: flex-start;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <div>
+              <strong style="color: #f59e0b; display: block; margin-bottom: 2px;">Assembly Tip</strong>
+              ${step.tip}
+            </div>
+          </div>
+        `;
+      } else {
+        tipEl.innerHTML = '';
+      }
+    }
+
+    if (partsListEl) {
+      let partsHtml = '';
+      step.parts.forEach((p) => {
+        partsHtml += `
+          <div class="lego-part-item">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <span class="qty-badge">${p.qty}</span>
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                <p style="font-size: 12px; font-weight: 600; color: #ffffff; margin: 0;">${p.name}</p>
+                <p style="font-size: 10px; color: #9ca3af; font-family: monospace; margin: 0;">${p.dim}</p>
+              </div>
+            </div>
+            <span style="width: 14px; height: 14px; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.3); background-color: ${p.color}; flex-shrink: 0;" title="${p.mat}"></span>
+          </div>
+        `;
+      });
+      partsListEl.innerHTML = partsHtml;
+    }
   }
 
   function updateStepUI(stepNum) {
@@ -510,9 +572,9 @@
     }
 
     const stepData = DESK_STEPS[stepNum - 1];
-    renderLegoCard(stepData);
+    renderRightPartsWidget(stepData);
 
-    // Update bottom controller text
+    // Update bottom controller
     const titleEl = document.getElementById('stepTitleDisplay');
     const descEl = document.getElementById('stepDescDisplay');
     const counterEl = document.getElementById('stepCounterDisplay');
@@ -532,13 +594,24 @@
       }
     }
 
-    // Update step pills
+    // Step pills
     const pillsContainer = document.getElementById('stepPillsRow');
     if (pillsContainer) {
       const pills = pillsContainer.querySelectorAll('.step-pill-btn');
       pills.forEach((btn, idx) => {
         const num = idx + 1;
         btn.className = `step-pill-btn ${num === stepNum ? 'active' : (num < stepNum ? 'completed' : '')}`;
+      });
+    }
+
+    // Jump step buttons on right widget
+    const jumpGrid = document.getElementById('rightJumpGrid');
+    if (jumpGrid) {
+      const btns = jumpGrid.querySelectorAll('button');
+      btns.forEach((b, idx) => {
+        const n = idx + 1;
+        b.style.backgroundColor = (n === stepNum) ? '#f59e0b' : (n < stepNum ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)');
+        b.style.color = (n === stepNum) ? '#000000' : (n < stepNum ? '#ffffff' : '#6b7280');
       });
     }
   }
@@ -550,7 +623,7 @@
     deskViewerInstance = new DeskViewer3D(canvasBox);
     updateStepUI(1);
 
-    // Wire up preset buttons
+    // Preset buttons
     ['iso', 'front', 'top', 'side'].forEach((p) => {
       const btn = document.getElementById('preset-' + p);
       if (btn) btn.addEventListener('click', () => deskViewerInstance.setPreset(p));
@@ -565,7 +638,7 @@
       });
     }
 
-    // Step Nav
+    // Prev / Next
     const prevBtn = document.getElementById('btnStepPrev');
     const nextBtn = document.getElementById('btnStepNext');
 
@@ -587,7 +660,8 @@
 
     // Keyboard navigation
     window.addEventListener('keydown', (e) => {
-      if (document.getElementById('chatViewSection').style.display !== 'none') {
+      const chatSection = document.getElementById('chatViewSection');
+      if (chatSection && chatSection.style.display !== 'none') {
         if (e.key === 'ArrowRight') {
           if (currentStepIndex < DESK_STEPS.length) updateStepUI(currentStepIndex + 1);
         } else if (e.key === 'ArrowLeft') {
@@ -613,37 +687,178 @@
         }
       });
     }
+
+    // Right jump grid
+    const jumpGrid = document.getElementById('rightJumpGrid');
+    if (jumpGrid) {
+      let jumpHtml = '';
+      for (let i = 1; i <= DESK_STEPS.length; i++) {
+        jumpHtml += `
+          <button type="button" data-jump="${i}" style="height: 28px; border-radius: 8px; font-family: monospace; font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: all 0.15s ease; background-color: ${i === 1 ? '#f59e0b' : 'rgba(255,255,255,0.05)'}; color: ${i === 1 ? '#000000' : '#6b7280'};">
+            ${i}
+          </button>
+        `;
+      }
+      jumpGrid.innerHTML = jumpHtml;
+      jumpGrid.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (b) {
+          const stepNum = parseInt(b.getAttribute('data-jump'), 10);
+          updateStepUI(stepNum);
+        }
+      });
+    }
   }
 
-  function launchDeskDemo(userQuery) {
+  function launchActiveChatView(query) {
     const landing = document.getElementById('landingViewSection');
     const chatView = document.getElementById('chatViewSection');
+    const rightPanel = document.getElementById('rightPartsWidget');
+    const mainContent = document.getElementById('mainContentArea');
     const userMsgText = document.getElementById('userMsgTextDisplay');
+    const chatTitleDisplay = document.getElementById('chatTitleHeaderDisplay');
 
     if (landing) landing.style.display = 'none';
     if (chatView) chatView.style.display = 'flex';
-    if (userMsgText) userMsgText.textContent = userQuery || "Hey I want to build a desk";
+    if (userMsgText) userMsgText.textContent = query || "Hey I want to build a desk";
+    if (chatTitleDisplay) chatTitleDisplay.textContent = query ? (query.length > 28 ? query.substring(0, 28) + "..." : query) : "Executive Oak Desk";
 
-    // Setup 3D viewer if not already initialized
+    // Show Right Parts Callout Widget when message has been sent
+    if (rightPanel) {
+      rightPanel.classList.remove('collapsed');
+      rightPanel.style.display = 'flex';
+    }
+    if (mainContent) {
+      mainContent.classList.add('right-widget-open');
+    }
+
     setTimeout(() => {
       setupDeskViewer();
+      updateStepUI(currentStepIndex);
     }, 50);
   }
 
-  function initChatInputs() {
-    // Landing Input
+  function switchToNewChat() {
+    activeSessionId = null;
+    const landing = document.getElementById('landingViewSection');
+    const chatView = document.getElementById('chatViewSection');
+    const rightPanel = document.getElementById('rightPartsWidget');
+    const mainContent = document.getElementById('mainContentArea');
+
+    if (chatView) chatView.style.display = 'none';
+    if (rightPanel) {
+      rightPanel.style.display = 'none';
+    }
+    if (mainContent) {
+      mainContent.classList.remove('right-widget-open');
+    }
+    if (landing) landing.style.display = 'flex';
+
+    renderSidebarSessions();
+  }
+
+  function initApp() {
+    renderSidebarSessions();
+
+    // Sidebar Toggling
+    const sidebar = document.getElementById('appSidebar');
+    const toggleSidebarBtn = document.getElementById('btnToggleSidebar');
+    const closeSidebarBtn = document.getElementById('btnCloseSidebar');
+    const mainContent = document.getElementById('mainContentArea');
+
+    function toggleSidebar() {
+      sidebarOpen = !sidebarOpen;
+      if (sidebar) sidebar.classList.toggle('collapsed', !sidebarOpen);
+      if (mainContent) mainContent.classList.toggle('sidebar-closed', !sidebarOpen);
+    }
+
+    if (toggleSidebarBtn) toggleSidebarBtn.addEventListener('click', toggleSidebar);
+    if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
+
+    // Right Widget Toggling
+    const rightPanel = document.getElementById('rightPartsWidget');
+    const closeRightBtn = document.getElementById('btnCloseRightWidget');
+    const openRightBtn = document.getElementById('btnOpenRightWidget');
+
+    function toggleRightWidget() {
+      rightWidgetOpen = !rightWidgetOpen;
+      if (rightPanel) rightPanel.classList.toggle('collapsed', !rightWidgetOpen);
+      if (mainContent) mainContent.classList.toggle('right-widget-open', rightWidgetOpen);
+      if (openRightBtn) openRightBtn.style.display = rightWidgetOpen ? 'none' : 'flex';
+    }
+
+    if (closeRightBtn) closeRightBtn.addEventListener('click', toggleRightWidget);
+    if (openRightBtn) openRightBtn.addEventListener('click', toggleRightWidget);
+
+    // New Chat Button
+    const newChatBtn = document.getElementById('btnNewChat');
+    const topNewChatBtn = document.getElementById('topNewChatBtn');
+    if (newChatBtn) newChatBtn.addEventListener('click', switchToNewChat);
+    if (topNewChatBtn) topNewChatBtn.addEventListener('click', switchToNewChat);
+
+    // Sessions list click delegation
+    const sessionsList = document.getElementById('chatSessionsList');
+    if (sessionsList) {
+      sessionsList.addEventListener('click', (e) => {
+        const delBtn = e.target.closest('.delete-btn');
+        if (delBtn) {
+          e.stopPropagation();
+          const delId = delBtn.getAttribute('data-delete-id');
+          chatSessions = chatSessions.filter(s => s.id !== delId);
+          if (activeSessionId === delId) {
+            switchToNewChat();
+          } else {
+            renderSidebarSessions();
+          }
+          return;
+        }
+
+        const item = e.target.closest('.chat-item');
+        if (item) {
+          const sid = item.getAttribute('data-id');
+          activeSessionId = sid;
+          renderSidebarSessions();
+          const sess = chatSessions.find(s => s.id === sid);
+          if (sess) {
+            launchActiveChatView(sess.preview);
+          }
+        }
+      });
+    }
+
+    // Landing input
     const landingTextarea = document.getElementById('chatInputTextarea');
     const landingSendBtn = document.getElementById('chatSendBtn');
     const demoChip = document.getElementById('demoPromptChip');
 
-    function handleLandingSend() {
+    function handleSend() {
       if (!landingTextarea) return;
-      const text = landingTextarea.value.trim();
-      if (!text) return;
-      console.log("Message sent:", text);
-      launchDeskDemo(text);
+      const t = landingTextarea.value.trim();
+      if (!t) return;
+      console.log("Message sent:", t);
+
+      // Create new session
+      const newId = "session-" + Date.now();
+      const newTitle = t.length > 24 ? t.substring(0, 24) + "..." : t;
+      chatSessions.unshift({
+        id: newId,
+        title: /desk|build/i.test(t) ? "Modern Solid Oak Desk" : newTitle,
+        preview: t,
+        timestamp: "Just now",
+        has3D: true,
+        currentStep: 1,
+        messages: [
+          { sender: "user", text: t },
+          { sender: "assistant", text: "Here is your 3D assembly manual. The parts required for each step are displayed in the Parts Callout widget on the right." }
+        ]
+      });
+      activeSessionId = newId;
+      renderSidebarSessions();
+
       landingTextarea.value = '';
       landingSendBtn.disabled = true;
+
+      launchActiveChatView(t);
     }
 
     if (landingTextarea && landingSendBtn) {
@@ -653,22 +868,22 @@
       landingTextarea.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          handleLandingSend();
+          handleSend();
         }
       });
-      landingSendBtn.addEventListener('click', handleLandingSend);
+      landingSendBtn.addEventListener('click', handleSend);
     }
 
     if (demoChip) {
       demoChip.addEventListener('click', function () {
-        launchDeskDemo("Hey I want to build a desk");
+        landingTextarea.value = "Hey I want to build a desk";
+        handleSend();
       });
     }
 
-    // Pinned Chat View Input
+    // Pinned chat input
     const pinnedTextarea = document.getElementById('pinnedChatInputTextarea');
     const pinnedSendBtn = document.getElementById('pinnedChatSendBtn');
-
     if (pinnedTextarea && pinnedSendBtn) {
       pinnedTextarea.addEventListener('input', function () {
         pinnedSendBtn.disabled = !this.value.trim();
@@ -676,43 +891,33 @@
       pinnedTextarea.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          const t = pinnedTextarea.value.trim();
-          if (!t) return;
-          console.log("Message sent:", t);
+          const txt = pinnedTextarea.value.trim();
+          if (!txt) return;
+          console.log("Message sent:", txt);
           pinnedTextarea.value = '';
           pinnedSendBtn.disabled = true;
-          // Re-trigger desk step or acknowledgment
-          if (/step\s*(\d)/i.test(t)) {
-            const m = t.match(/step\s*(\d)/i);
-            if (m) updateStepUI(parseInt(m[1], 10));
-          }
+
+          // Check if user requested a specific step e.g. "show step 3"
+          const m = txt.match(/step\s*(\d)/i);
+          if (m) updateStepUI(parseInt(m[1], 10));
         }
       });
       pinnedSendBtn.addEventListener('click', function () {
-        const t = pinnedTextarea.value.trim();
-        if (!t) return;
-        console.log("Message sent:", t);
+        const txt = pinnedTextarea.value.trim();
+        if (!txt) return;
+        console.log("Message sent:", txt);
         pinnedTextarea.value = '';
         pinnedSendBtn.disabled = true;
       });
     }
 
-    // Reset / Clear button
-    const clearBtn = document.getElementById('clearChatBtn');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', function () {
-        const landing = document.getElementById('landingViewSection');
-        const chatView = document.getElementById('chatViewSection');
-        if (chatView) chatView.style.display = 'none';
-        if (landing) landing.style.display = 'flex';
-      });
-    }
+    // Start with demo session active
+    launchActiveChatView("Hey I want to build a desk");
   }
 
-  // Init
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initChatInputs);
+    document.addEventListener('DOMContentLoaded', initApp);
   } else {
-    initChatInputs();
+    initApp();
   }
 })();

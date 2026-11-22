@@ -29,3 +29,13 @@ export interface ChatMessage {
   timestamp: string;
   hasBuildDemo?: boolean;
 }
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  preview: string;
+  timestamp: string;
+  messages: ChatMessage[];
+  has3DViewer?: boolean;
+  currentStep?: number;
+}
