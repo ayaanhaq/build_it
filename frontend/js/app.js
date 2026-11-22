@@ -594,16 +594,6 @@
       }
     }
 
-    // Step pills
-    const pillsContainer = document.getElementById('stepPillsRow');
-    if (pillsContainer) {
-      const pills = pillsContainer.querySelectorAll('.step-pill-btn');
-      pills.forEach((btn, idx) => {
-        const num = idx + 1;
-        btn.className = `step-pill-btn ${num === stepNum ? 'active' : (num < stepNum ? 'completed' : '')}`;
-      });
-    }
-
     // Jump step buttons on right widget
     const jumpGrid = document.getElementById('rightJumpGrid');
     if (jumpGrid) {
@@ -623,22 +613,7 @@
     deskViewerInstance = new DeskViewer3D(canvasBox);
     updateStepUI(1);
 
-    // Preset buttons
-    ['iso', 'front', 'top', 'side'].forEach((p) => {
-      const btn = document.getElementById('preset-' + p);
-      if (btn) btn.addEventListener('click', () => deskViewerInstance.setPreset(p));
-    });
-
-    const spinBtn = document.getElementById('btnToggleSpin');
-    if (spinBtn) {
-      spinBtn.addEventListener('click', () => {
-        const active = deskViewerInstance.toggleAutoRotate();
-        spinBtn.style.backgroundColor = active ? '#f59e0b' : 'transparent';
-        spinBtn.style.color = active ? '#000000' : '#9ca3af';
-      });
-    }
-
-    // Prev / Next
+    // Prev / Next controls
     const prevBtn = document.getElementById('btnStepPrev');
     const nextBtn = document.getElementById('btnStepNext');
 
@@ -669,24 +644,6 @@
         }
       }
     });
-
-    // Step Pills
-    const pillsContainer = document.getElementById('stepPillsRow');
-    if (pillsContainer) {
-      let pillsHtml = '';
-      for (let i = 1; i <= DESK_STEPS.length; i++) {
-        pillsHtml += `<button type="button" class="step-pill-btn ${i === 1 ? 'active' : ''}" data-step="${i}">Step ${i}</button>`;
-      }
-      pillsContainer.innerHTML = pillsHtml;
-
-      pillsContainer.addEventListener('click', (e) => {
-        const btn = e.target.closest('.step-pill-btn');
-        if (btn) {
-          const s = parseInt(btn.getAttribute('data-step'), 10);
-          updateStepUI(s);
-        }
-      });
-    }
 
     // Right jump grid
     const jumpGrid = document.getElementById('rightJumpGrid');

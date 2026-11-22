@@ -109,96 +109,13 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
         />
       )}
 
-      {/* View Presets & Controls (Top-Right) */}
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 bg-[#18191c]/90 backdrop-blur-md border border-white/15 p-1.5 rounded-2xl shadow-xl">
-        <button
-          onClick={() => handlePresetView("isometric")}
-          title="Isometric View"
-          className="px-2.5 py-1 rounded-xl text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition"
-        >
-          Iso
-        </button>
-        <button
-          onClick={() => handlePresetView("front")}
-          title="Front View"
-          className="px-2.5 py-1 rounded-xl text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition"
-        >
-          Front
-        </button>
-        <button
-          onClick={() => handlePresetView("top")}
-          title="Top Down View"
-          className="px-2.5 py-1 rounded-xl text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition"
-        >
-          Top
-        </button>
-        <button
-          onClick={() => handlePresetView("side")}
-          title="Side View"
-          className="px-2.5 py-1 rounded-xl text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition"
-        >
-          Side
-        </button>
-        <div className="w-[1px] h-4 bg-white/20 mx-1" />
-        <button
-          onClick={handleToggleAutoRotate}
-          title={autoRotate ? "Pause Spin" : "Auto-Spin 3D Model"}
-          className={`p-1.5 rounded-xl transition ${
-            autoRotate
-              ? "bg-amber-500 text-black font-semibold"
-              : "text-gray-400 hover:text-white hover:bg-white/10"
-          }`}
-        >
-          <RotateCw size={15} className={autoRotate ? "animate-spin" : ""} />
-        </button>
-      </div>
-
-      {/* Interaction Hint Badge */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none hidden md:flex items-center gap-2 bg-black/60 backdrop-blur-sm border border-white/10 text-gray-400 text-[11px] px-3 py-1 rounded-full">
-        <span>Drag to rotate</span>
-        <span>•</span>
-        <span>Scroll / Pinch to zoom</span>
-        <span>•</span>
-        <span>Right-drag to pan</span>
-      </div>
-
       {/* Bottom Lego Instruction Manual Controller */}
       <div className="relative z-20 bg-[#121316]/95 backdrop-blur-md border-t border-white/10 p-4 md:p-5 text-white">
-        {/* Step Progress Pill Bar */}
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {DESK_BUILD_STEPS.map((s) => {
-              const isCurrent = s.stepNumber === currentStep;
-              const isCompleted = s.stepNumber < currentStep;
-              return (
-                <button
-                  key={s.stepNumber}
-                  onClick={() => handleStepChange(s.stepNumber)}
-                  className={`h-7 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                    isCurrent
-                      ? "bg-amber-500 text-black shadow-lg shadow-amber-500/25 scale-105"
-                      : isCompleted
-                      ? "bg-white/15 text-white hover:bg-white/25"
-                      : "bg-white/5 text-gray-400 hover:bg-white/10"
-                  }`}
-                >
-                  {isCompleted ? (
-                    <CheckCircle2 size={12} className="text-emerald-400" />
-                  ) : null}
-                  Step {s.stepNumber}
-                </button>
-              );
-            })}
-          </div>
-
-          <span className="text-xs font-mono text-gray-400 hidden sm:inline">
-            Step {currentStep} of {totalSteps}
-          </span>
-        </div>
-
-        {/* Step Title & Controls Row */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex-1 min-w-0 pr-4">
+            <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider block mb-1">
+              Step {currentStep} of {totalSteps}
+            </span>
             <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2 truncate">
               {activeStepData.title}
             </h3>

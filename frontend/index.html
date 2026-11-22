@@ -70,14 +70,6 @@
         </div>
       </div>
 
-      <!-- Sidebar Footer -->
-      <div style="padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #6b7280;">
-        <span style="display: flex; align-items: center; gap: 6px; font-family: monospace;">
-          <span style="width: 6px; height: 6px; border-radius: 9999px; background-color: #10b981; display: inline-block;"></span>
-          3D Engine Ready
-        </span>
-        <span style="font-family: monospace; font-size: 10px;">v2.0</span>
-      </div>
     </aside>
 
     <!-- 2. MAIN CONTENT AREA (CENTER) -->
@@ -184,32 +176,11 @@
               <div class="desk-viewer-box">
                 <div class="canvas-viewport" id="desk3DCanvas"></div>
 
-                <!-- View Presets Bar (Top-Right) -->
-                <div class="view-controls-bar">
-                  <button type="button" class="view-preset-btn" id="preset-iso" title="Isometric View">Iso</button>
-                  <button type="button" class="view-preset-btn" id="preset-front" title="Front View">Front</button>
-                  <button type="button" class="view-preset-btn" id="preset-top" title="Top View">Top</button>
-                  <button type="button" class="view-preset-btn" id="preset-side" title="Side View">Side</button>
-                  <div style="width: 1px; height: 16px; background-color: rgba(255, 255, 255, 0.2); margin: 0 4px;"></div>
-                  <button type="button" class="view-preset-btn" id="btnToggleSpin" title="Auto-Spin 3D Model">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-                  </button>
-                </div>
-
-                <!-- Interaction Hint Badge -->
-                <div style="position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 10; pointer-events: none; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.1); color: #9ca3af; font-size: 11px; padding: 4px 12px; border-radius: 9999px; display: flex; gap: 8px;">
-                  <span>Drag to rotate</span><span>•</span><span>Scroll / Pinch to zoom</span><span>•</span><span>Right-drag to pan</span>
-                </div>
-
                 <!-- Bottom Lego Controller Bar -->
                 <div class="lego-controller">
-                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                    <div id="stepPillsRow" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
-                    <span id="stepCounterDisplay" style="font-size: 12px; font-family: monospace; color: #9ca3af;">Step 1 of 6</span>
-                  </div>
-
                   <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
                     <div style="flex: 1; min-width: 240px;">
+                      <span id="stepCounterDisplay" style="font-size: 12px; font-family: monospace; font-weight: 700; color: #f59e0b; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 4px;">Step 1 of 6</span>
                       <h3 id="stepTitleDisplay" style="margin: 0; font-size: 16px; font-weight: 700; color: #ffffff;">Stand the 4 Heavy-Duty Legs</h3>
                       <p id="stepDescDisplay" style="margin: 4px 0 0 0; font-size: 12px; color: #9ca3af; line-height: 1.4;">Stand the four solid oak legs on your workspace.</p>
                     </div>

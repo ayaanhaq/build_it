@@ -139,14 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Footer Info */}
-      <div className="pt-3 border-t border-white/10 px-2 flex items-center justify-between text-[11px] text-gray-500">
-        <span className="flex items-center gap-1.5 font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          3D Engine Active
-        </span>
-        <span className="font-mono text-[10px] text-gray-600">v2.0</span>
-      </div>
+      {/* Footer Info removed as requested */}
     </aside>
   );
 };
