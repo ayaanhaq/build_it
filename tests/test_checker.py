@@ -246,23 +246,23 @@ class CheckerTests(unittest.TestCase):
         errors = self.get_errors(design, custom_lib)
         self.assertFalse(any("5.0V sensor output" in e for e in errors))
 
-    def test_led_unverified_gpio_limit_under_8ma_warns_and_passes(self):
+    def test_led_unverified_driver_limit_under_8ma_warns_and_passes(self):
         custom_lib = dict(LIB)
-        custom_lib["custom_mcu"] = {
+        custom_lib["custom_driver"] = {
             "pins": {
-                "GPIO1": {"role": "gpio", "level": 3.3, "max_source_ma": "UNVERIFIED"},
+                "OUT": {"role": "output", "level": 3.3, "max_source_ma": "UNVERIFIED"},
                 "GND": {"role": "ground"},
             }
         }
         # (3.3 - 2.0) / 330 ohm = ~3.94 mA < 8.0 mA
         design = {
-            "name": "unverified_gpio_pass",
-            "parts": {"mcu": "custom_mcu", "led1": "led", "r1": "resistor"},
+            "name": "unverified_driver_pass",
+            "parts": {"drv": "custom_driver", "led1": "led", "r1": "resistor"},
             "values": {"r1": 330},
             "nets": {
-                "SIGNAL": ["mcu.GPIO1", "r1.a"],
+                "SIGNAL": ["drv.OUT", "r1.a"],
                 "LED_ANODE": ["r1.b", "led1.anode"],
-                "GND": ["mcu.GND", "led1.cathode"],
+                "GND": ["drv.GND", "led1.cathode"],
             },
         }
         errors, warnings = check_with_warnings(design, custom_lib)
@@ -279,8 +279,31 @@ class CheckerTests(unittest.TestCase):
         self.assertTrue(any("pir.OUT" in w and "UNVERIFIED" in w for w in warnings))
         self.assertEqual(check(design, LIB), [])
 
-    def test_led_unverified_gpio_limit_over_8ma_fails(self):
+    def test_led_unverified_driver_limit_over_8ma_fails(self):
         # (3.3 - 2.0) / 100 ohm = 13.0 mA > 8.0 mA default
+        custom_lib = dict(LIB)
+        custom_lib["custom_driver"] = {
+            "pins": {
+                "OUT": {"role": "output", "level": 3.3, "max_source_ma": "UNVERIFIED"},
+                "GND": {"role": "ground"},
+            }
+        }
+        design = {
+            "name": "unverified_driver_fail",
+            "parts": {"drv": "custom_driver", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 100},
+            "nets": {
+                "SIGNAL": ["drv.OUT", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["drv.GND", "led1.cathode"],
+            },
+        }
+        errors, warnings = check_with_warnings(design, custom_lib)
+        self.assertTrue(any("max_source_ma" in w and "UNVERIFIED" in w for w in warnings))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in errors))
+        self.assertTrue(any("exceeds" in e and "8.0" in e for e in check(design, custom_lib)))
+
+    def test_unverified_gpio_max_source_ma_blocks_design(self):
         custom_lib = dict(LIB)
         custom_lib["custom_mcu"] = {
             "pins": {
@@ -289,19 +312,80 @@ class CheckerTests(unittest.TestCase):
             }
         }
         design = {
-            "name": "unverified_gpio_fail",
+            "name": "unverified_gpio_max_source",
             "parts": {"mcu": "custom_mcu", "led1": "led", "r1": "resistor"},
-            "values": {"r1": 100},
+            "values": {"r1": 330},
             "nets": {
                 "SIGNAL": ["mcu.GPIO1", "r1.a"],
                 "LED_ANODE": ["r1.b", "led1.anode"],
                 "GND": ["mcu.GND", "led1.cathode"],
             },
         }
-        errors, warnings = check_with_warnings(design, custom_lib)
-        self.assertTrue(any("max_source_ma" in w and "UNVERIFIED" in w for w in warnings))
-        self.assertTrue(any("exceeds" in e and "8.0" in e for e in errors))
-        self.assertTrue(any("exceeds" in e and "8.0" in e for e in check(design, custom_lib)))
+        errors = self.get_errors(design, custom_lib)
+        self.assertTrue(any("Fail-closed: GPIO pin 'mcu.GPIO1' has unverified absolute maximum 'max_source_ma'" in e for e in errors))
+
+    def test_unverified_gpio_level_blocks_design(self):
+        custom_lib = dict(LIB)
+        custom_lib["custom_mcu"] = {
+            "pins": {
+                "GPIO1": {"role": "gpio", "level": "UNVERIFIED", "max_source_ma": 16},
+                "GND": {"role": "ground"},
+            }
+        }
+        design = {
+            "name": "unverified_gpio_level",
+            "parts": {"mcu": "custom_mcu", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 330},
+            "nets": {
+                "SIGNAL": ["mcu.GPIO1", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["mcu.GND", "led1.cathode"],
+            },
+        }
+        errors = self.get_errors(design, custom_lib)
+        self.assertTrue(any("Fail-closed: GPIO pin 'mcu.GPIO1' has unverified absolute maximum 'level'" in e for e in errors))
+
+    def test_unverified_power_voltage_blocks_design(self):
+        custom_lib = dict(LIB)
+        custom_lib["custom_pwr"] = {
+            "pins": {
+                "VCC": {"role": "power", "v": "UNVERIFIED"},
+                "GND": {"role": "ground"},
+            }
+        }
+        design = {
+            "name": "unverified_power_v",
+            "parts": {"pwr": "custom_pwr", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 330},
+            "nets": {
+                "SIGNAL": ["pwr.VCC", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["pwr.GND", "led1.cathode"],
+            },
+        }
+        errors = self.get_errors(design, custom_lib)
+        self.assertTrue(any("Fail-closed: Power pin 'pwr.VCC' has unverified absolute maximum 'v'" in e for e in errors))
+
+    def test_unverified_power_max_source_ma_blocks_design(self):
+        custom_lib = dict(LIB)
+        custom_lib["custom_pwr"] = {
+            "pins": {
+                "VCC": {"role": "power", "v": 5.0, "max_source_ma": "UNVERIFIED"},
+                "GND": {"role": "ground"},
+            }
+        }
+        design = {
+            "name": "unverified_power_max_source",
+            "parts": {"pwr": "custom_pwr", "led1": "led", "r1": "resistor"},
+            "values": {"r1": 330},
+            "nets": {
+                "SIGNAL": ["pwr.VCC", "r1.a"],
+                "LED_ANODE": ["r1.b", "led1.anode"],
+                "GND": ["pwr.GND", "led1.cathode"],
+            },
+        }
+        errors = self.get_errors(design, custom_lib)
+        self.assertTrue(any("Fail-closed: Power pin 'pwr.VCC' has unverified absolute maximum 'max_source_ma'" in e for e in errors))
 
     def test_led_unverified_sensor_limit_over_8ma_fails(self):
         # pir_sensor with 100 ohm resistor: current is 13.0 mA > 8.0 mA default
