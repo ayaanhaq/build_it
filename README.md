@@ -16,13 +16,16 @@ A deterministic electrical safety checker and instruction generator for physical
   - [Running Tests](#running-tests)
   - [Running the CLI](#running-the-cli)
 - [System Architecture](#system-architecture)
+- [3D Assembly Manual & HeyClicky Rendering Pipeline](#3d-assembly-manual--heyclicky-rendering-pipeline)
+  - [HeyClicky Multi-Pass Rendering Engine](#heyclicky-multi-pass-rendering-engine)
+  - [How to Expand: Adding New 3D Builds](#how-to-expand-adding-new-3d-builds)
 - [Recapitulation of Work & Evolution](#recapitulation-of-work--evolution)
   - [Task B: Explicit Sensor Model & Pin Roles](#task-b-explicit-sensor-model--pin-roles)
   - [Task A: UNVERIFIED Limits & Conservative Defaults](#task-a-unverified-limits--conservative-defaults)
   - [Task C: Transistor Base Resistor & Relay Protection](#task-c-transistor-base-resistor--relay-protection)
   - [Task D: Test Hardening & Error Substring Precision](#task-d-test-hardening--error-substring-precision)
   - [Phase 1: On-Demand Architecture & Fail-Closed Safety](#phase-1-on-demand-architecture--fail-closed-safety)
-  - [Frontend: Builders Archive (Traditional Web Stack)](#frontend-builders-archive-traditional-web-stack)
+  - [Frontend: Modern 3D Traditional Web Stack](#frontend-modern-3d-traditional-web-stack)
 - [Branch Sitemap](#branch-sitemap)
 - [Electrical Safety Rules](#electrical-safety-rules)
 - [Netlist & Component Library Specification](#netlist--component-library-specification)
@@ -94,6 +97,160 @@ python3 main.py examples/pir_bad_5v.json
 2. **`checker.py`**: Deterministic rule checker enforcing electrical constraints without external network calls or non-deterministic heuristics.
 3. **`renderer.py`**: Instruction generator grouping connections by functional subsystem (`Power` $\rightarrow$ `Signal` $\rightarrow$ `Output`) with bench multimeter continuity tests.
 4. **`main.py`**: CLI entry point supporting standard human-readable text and `--json` API output.
+5. **3D Web Application (`frontend/` & `src/`)**: 3-column interactive assembly manual powered by Three.js and HeyClicky's procedural technical rendering pipeline.
+
+---
+
+## 3D Assembly Manual & HeyClicky Rendering Pipeline
+
+The frontend features an interactive, step-by-step 3D assembly manual inspired by Lego instructions and HeyClicky's real-time procedural rendering engine.
+
+```
+   ┌───────────────────┐    ┌───────────────────────────────────┐    ┌──────────────────────────┐
+   │   LEFT SIDEBAR    │    │           MAIN WORKSPACE          │    │   RIGHT PARTS WIDGET     │
+   │  (Chat Sessions)  │    │      (3D Engine & Chat Stream)    │    │   (Bill of Materials)    │
+   │                   │    │                                   │    │                          │
+   │  • Session list   │    │  • AIChatInput (Prompt Bar)       │    │  • Active Step Progress  │
+   │  • "+ New Chat"   │    │  • Three.js Interactive Viewport  │    │  • Required Components   │
+   │  • Delete session │    │  • 2D Analytical Leader Callouts  │    │  • Dimensions & Swatches │
+   │  • Collapsible    │    │  • Prev / Next Step Controller    │    │  • Assembly Pro-Tips     │
+   │                   │    │  • Resting Sway (CANVAS_3D_SWAY)  │    │  • "Jump to Step" Grid   │
+   └───────────────────┘    └───────────────────────────────────┘    └──────────────────────────┘
+                                              ▲                                   ▲
+                                              └────── Bidirectional Sync ─────────┘
+```
+
+### HeyClicky Multi-Pass Rendering Engine
+
+The 3D rendering pipeline (implemented in `src/three-scene.ts` for React/TypeScript and `frontend/js/app.js` for standalone vanilla HTML/JS) ports HeyClicky's technical rendering architecture:
+
+1. **Pass 1 — Object Picking & Interactive Raycasting:**
+   - Real-time GPU raycasting on pointer move tracks mouse coordinates against all visible interactive component meshes.
+   - Hovered parts exhibit an emissive highlight (`#221A00`), while selected parts glow warm amber (`#3A2800`).
+2. **Pass 2 — Technical Ink Outlines & Seams:**
+   - Procedural edge extraction via `THREE.EdgesGeometry` (`linewidth: 1.5`, color `REAL_TONES.ink`, 85% opacity) overlaid onto geometry surfaces, producing clean CAD and Lego instruction manual line art.
+3. **`REAL_TONES` Physical Material Palette:**
+   - Non-candy physical materials matching authentic architectural finishes:
+     - `ink` (`#2C2E33`): Technical edge seams, steel fasteners, and raceways.
+     - `tan` (`#B9946F`): Kiln-dried White Oak framing and legs.
+     - `brown` (`#6D4A2F`): Walnut core drawer housing.
+     - `sun` (`#D6A83C`): Rubberized brass leveling glides.
+     - `cream` (`#EAD9BE`): Chamfered tabletop edge highlights.
+     - `leather` (`#18191B`): Full-grain charcoal desk mat.
+     - `coral` (`#B04838`): Accent components and hardware callouts.
+4. **Pass 5 & 6 — Studio 3-Point Lighting & Contact Shadow Dais:**
+   - Directional warm key light (`0xfff8f0`, intensity 1.35) at high elevation.
+   - Cool ambient fill bounce (`0xdfebfa`, intensity 0.65).
+   - High-contrast edge rim light (`0xffeedd`, intensity 0.85).
+   - Circular dark presentation dais (`CylinderGeometry(58, 60, 0.4, 48)`) with a soft contact shadow disc (`CircleGeometry(42, 32)`).
+5. **Pass 8 — Analytical 2D Leader Line Callouts:**
+   - When hovering over or selecting any component in the 3D viewport, a screen-projected capsule badge with a pulsing indicator dot and directional pointer arrow tracks the cursor over the part in screen space.
+6. **Resting Sway (`CANVAS_3D_CUT_SWAY`):**
+   - Subtle sinusoidal yaw sway (`sin(now * 0.0008) * 0.035`) kicks in automatically after 1.2 seconds of idle time, preserving 3D depth perception and perspective without requiring user input.
+7. **Bidirectional Part Selection:**
+   - Clicking or hovering any row in the **Right-Side Parts Callout** widget instantly targets and highlights the part in the 3D viewport.
+   - Clicking any 3D mesh in the viewport highlights the corresponding Bill of Materials entry in the right widget.
+
+---
+
+### How to Expand: Adding New 3D Builds
+
+The rendering engine and step state machine are completely agnostic to what object is being built. To add a new build (e.g. a **Modular Bookcase**, **Ergonomic Chair**, or **Electronics Breadboard**), follow these 4 steps:
+
+#### Step 1: Define the Build Step Dataset
+Create a dataset conforming to the `BuildStep` schema (`src/types.ts`):
+
+```typescript
+export interface BuildStep {
+  stepNumber: number;
+  title: string;
+  subtitle: string;
+  description: string;
+  tip?: string;
+  parts: Array<{
+    id?: string;
+    name: string;
+    qty: string;
+    dimensions: string; // or dim in vanilla JS
+    color: string;
+    material: string;
+  }>;
+  cam: { dist: number; phi: number; theta: number };
+}
+```
+
+Example for a **Modular Bookcase**:
+```typescript
+export const BOOKCASE_STEPS: BuildStep[] = [
+  {
+    stepNumber: 1,
+    title: "Assemble Upright Side Panels",
+    subtitle: "Vertical Frame · Left & Right Uprights",
+    description: "Lay the two vertical fluted upright panels parallel on your assembly mat.",
+    tip: "Ensure pre-drilled shelf pin holes face inwards before attaching bases.",
+    parts: [
+      { name: "Fluted Oak Upright Panels", qty: "2×", dimensions: "1800 × 300 × 25 mm", color: "#B9946F", material: "White Oak" }
+    ],
+    cam: { dist: 110, phi: 1.1, theta: 0.6 }
+  },
+  // Additional steps (shelves, back brace, levelers)...
+];
+```
+
+#### Step 2: Implement Procedural 3D Geometry
+In `src/three-scene.ts` (and `frontend/js/app.js`), create a procedural build method:
+
+```typescript
+private buildBookcaseModel(): void {
+  const oakMat = this.createPbrMaterial(REAL_TONES.tan, 0.38, 0.04);
+  const pinMat = this.createPbrMaterial(REAL_TONES.sun, 0.22, 0.88);
+
+  // STEP 1: Uprights Group
+  const group1 = new THREE.Group();
+  const uprightGeo = new THREE.BoxGeometry(2.5, 90, 20);
+
+  [-20, 20].forEach((x, idx) => {
+    const upright = new THREE.Mesh(uprightGeo, oakMat.clone());
+    upright.position.set(x, 45, 0);
+    upright.castShadow = true;
+    upright.receiveShadow = true;
+    
+    // Register mesh for Pass 1 picking and Pass 2 ink outlines
+    this.registerMesh(upright, idx === 0 ? "Left Upright Panel" : "Right Upright Panel", "Fluted Oak Upright Panels", group1);
+  });
+
+  this.stepGroups.set(1, group1);
+  this.scene.add(group1);
+
+  // STEP 2: Shelves Group...
+}
+```
+
+#### Step 3: Register Meshes with Outlines & Picking Metadata
+Always route created meshes through `registerMesh`:
+```typescript
+private registerMesh(mesh: THREE.Mesh, specificName: string, categoryName: string, group: THREE.Group): void {
+  mesh.name = specificName;
+  mesh.userData = { partName: specificName, category: categoryName };
+  this.addInkOutlines(mesh, 24); // Adds HeyClicky Pass 2 ink lines
+  group.add(mesh);
+  this.allInteractiveMeshes.push(mesh);
+  this.partMeshes.set(specificName, mesh);
+}
+```
+
+#### Step 4: Wire Chat Intent to the Model Switcher
+In `src/App.tsx` and `frontend/js/app.js`, inspect user query keywords to load the appropriate build data:
+
+```typescript
+if (query.toLowerCase().includes("bookcase") || query.toLowerCase().includes("shelf")) {
+  setActiveBuildSteps(BOOKCASE_STEPS);
+  viewerRef.current?.loadModel("bookcase");
+} else {
+  setActiveBuildSteps(DESK_BUILD_STEPS);
+  viewerRef.current?.loadModel("desk");
+}
+```
 
 ---
 
@@ -155,17 +312,23 @@ python3 main.py examples/pir_bad_5v.json
     - Created local PDF ingestion stub extracting page text and computing SHA-256 checksums.
     - Added modular backend support: pure Python `pypdf` default with pluggable adapters for `PyMuPDF` (`fitz`) and `pdfplumber`.
 
-### Frontend: Builders Archive (Traditional Web Stack)
+### Frontend: Modern 3D Traditional Web Stack
 - **Branch:** `frontend-traditional-stack`
-- **Goal:** Replace raw proprietary design-canvas export files (`Main.dc.html`) with a production-grade web application built using the traditional web stack.
+- **Goal:** Transform the frontend into a modern, 3-column interactive build assistant powered by standard web technologies (HTML5, CSS3, TypeScript, JavaScript, Three.js).
 - **Changes:**
-  - **`frontend/index.html`**: Clean HTML5 semantic layout with ARIA accessibility roles and Google Fonts (`Barlow Condensed`, `Architects Daughter`, `IBM Plex Mono`, `IBM Plex Sans`).
-  - **`frontend/css/styles.css`**: CSS custom properties for live blueprint theme switching (`--paper`, `--panel`, `--pencil`, `--ink`), 3D CSS transforms (`perspective: 1400px; transform-style: preserve-3d;`), technical dual-grid drafting background, and responsive layouts.
-  - **`frontend/js/app.js`**: Modular vanilla ES6+ JavaScript implementing:
-    - **Interactive 3D Workbench Model**: Mouse drag 3D rotation (`rotateX`, `rotateY`), preset rotation controls (Turn Left/Right, Reset View), and 6 step-by-step assembly states with highlighted new parts vs. already built parts.
-    - **7 Blueprint Sheets**: 01 Chat (prompt input, action buttons, quick chips), 02 Build (3D viewport, bill of materials, step drawer), 03 Projects, 04 Files (drag-and-drop zone), 05 History, 06 About, and 07 Settings (theme palette pickers, glow/crosshair toggles).
-    - **Drafting Tooling**: Real-time cursor crosshair tracking (`X 0450  Y 0320`), radial cursor glow, technical rulers, and dynamically updating Title Block (`DWG A-001` through `A-007`).
-  - **`frontend/README.md`**: Guide to running the app locally via `python3 -m http.server -d frontend 8000` or direct browser file opening.
+  - **3-Column Architecture:**
+    - **Left Sidebar:** Multi-session chat history tracking with "+ New Chat" session creation and quick management.
+    - **Center Workspace:** Pure black background with centered `AIChatInput` component, interactive 3D Three.js assembly manual, single-line step counter, and Lego-style previous/next navigation.
+    - **Right Parts Callout Widget:** Dedicated Bill of Materials widget that dynamically activates on message sent, featuring step progress, required components with dimensions and material swatches, assembly tips, and jump-to-step grid.
+  - **HeyClicky Multi-Pass Rendering Pipeline:**
+    - Pass 1 object picking and raycasting with hover and selection emissive glows.
+    - Pass 2 technical ink outlines via `THREE.EdgesGeometry` (`color: REAL_TONES.ink`, `linewidth: 1.5`).
+    - `REAL_TONES` authentic physical material palette (`ink`, `tan`, `brown`, `sun`, `steel`, `leather`, `cream`, `coral`).
+    - Studio 3-point lighting (warm key, cool fill, rim) and dark dais with contact shadow disc.
+    - Pass 8 analytical 2D leader callout capsule tracking parts with pulsating indicator and directional pointer.
+    - Idle resting sway (`CANVAS_3D_CUT_SWAY`) maintaining 3D depth perception.
+    - Bidirectional part selection between the 3D viewport and the right-side BOM list.
+  - **Dual-Stack Parity:** 100% feature parity maintained between the Vite/React/TypeScript stack (`src/`) and the standalone vanilla HTML/CSS/JS stack (`frontend/`).
 
 ---
 

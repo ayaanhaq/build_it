@@ -15,26 +15,67 @@ This directory contains the modernized **Builders Archive** frontend built with 
    - Keeps track of all chats created so far.
    - Includes **"+ New Chat"** button to start a fresh prompt session anytime.
    - Highlights active conversation and allows selecting past sessions or deleting them.
-   - Collapsible with the sidebar toggle button.
+   - Collapsible with the top-left sidebar toggle button.
 
 2. **Center Workspace (Main Canvas & Chat Stream):**
-   - Clean, center-aligned `AIChatInput` component with Enter/Send and multi-line support.
-   - Full 3D assembly viewport with Three.js orbit controls:
-     - Click & drag to rotate 360°.
-     - Mouse wheel / touch pinch to zoom.
-     - Right-click or two-finger drag to pan.
-     - Camera presets: `Iso`, `Front`, `Top`, `Side`.
-     - Auto-spin showcase toggle.
-   - Lego-style step flipper controller at the bottom with previous/next buttons and step progress pills.
+   - Clean, center-aligned `AIChatInput` component with Enter/Send and multi-line support on pure black background.
+   - Full 3D assembly viewport powered by HeyClicky-style technical rendering:
+     - **Pass 1:** Raycast picking and hover glow.
+     - **Pass 2:** Technical ink outlines (`THREE.EdgesGeometry`).
+     - **Pass 5 & 6:** Studio 3-point lighting and soft contact shadow dais.
+     - **Pass 8:** Analytical 2D leader callout capsule tracking parts in real time.
+     - **Resting Sway (`CANVAS_3D_CUT_SWAY`):** Subtle sinusoidal yaw sway during idle.
+     - Click & drag to rotate 360°, scroll/pinch to zoom, right-click to pan.
+   - Single-line step counter (`Step 1 of 6`) and Lego-style Previous/Next navigation controller.
 
-3. **Right Parts Callout Widget:**
+3. **Right Parts Callout Widget (Bill of Materials):**
    - Automatically activates on the right side of the screen when a message is sent in chat.
    - Displays:
      - Active step progress bar and percentage.
      - Required components bill of materials (quantity pills, dimensions, materials, color swatches).
      - Practical assembly pro-tips for each phase.
      - Quick "Jump to Step" selector.
-   - Moving the parts callout to this dedicated right-side widget frees up the 3D viewport for an unobstructed viewing experience.
+     - **Bidirectional Selection:** Clicking or hovering a component row in the widget highlights the matching 3D mesh in the viewport, and clicking a 3D part highlights its entry in the widget.
+
+---
+
+## HeyClicky Multi-Pass Rendering Engine
+
+The 3D engine is architected around HeyClicky's technical illustration pipeline:
+- **`REAL_TONES` Palette:** Non-candy physical tones (`ink`, `tan`, `brown`, `sun`, `steel`, `leather`, `cream`, `coral`).
+- **Technical Ink Outlines (Pass 2):** High-precision edge contours overlaid on meshes via `THREE.EdgesGeometry` (`color: REAL_TONES.ink`, `linewidth: 1.5`).
+- **Interactive Picking (Pass 1):** GPU-level raycasting against interactive component meshes with hover emissive highlights.
+- **Analytical 2D Leader Callouts (Pass 8):** Screen-projected callout capsule badge with a pulsing indicator dot and directional pointer arrow.
+- **Resting Sway:** Idle camera yaw sway to maintain 3D depth perception.
+
+---
+
+## How to Expand to New 3D Builds
+
+To add new builds (e.g., Bookcase, Chair, Electronics Workbench):
+
+1. **Define the Steps Dataset:**
+   Add steps conforming to `BuildStep` (in `src/types.ts` or `frontend/js/app.js`):
+   ```javascript
+   {
+     stepNumber: 1,
+     title: "Step Title",
+     subtitle: "Step Subtitle",
+     description: "Instruction text...",
+     tip: "Pro assembly tip...",
+     parts: [{ name: "Part Name", qty: "2×", dim: "100x50mm", color: "#B9946F", mat: "Oak" }],
+     cam: { dist: 95, phi: 1.05, theta: 0.75 }
+   }
+   ```
+2. **Build Procedural Meshes:**
+   Create geometry with Three.js primitives (`BoxGeometry`, `CylinderGeometry`).
+3. **Register Meshes:**
+   Call `registerMesh(mesh, specificName, categoryName, stepGroup)`:
+   - Sets `mesh.name` and `mesh.userData.category`.
+   - Attaches `addInkOutlines(mesh)`.
+   - Adds mesh to `allInteractiveMeshes` for raycasting.
+4. **Trigger Build in Chat:**
+   In chat send handler, match prompt keywords (e.g. `"chair"`, `"shelf"`) to activate that model and step dataset.
 
 ---
 
