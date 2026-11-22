@@ -3,87 +3,238 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Builders Archive</title>
-  <meta name="description" content="Builders Archive — Traditional Web Tech Stack">
+  <title>Builders Archive — 3D Desk Build</title>
+  <meta name="description" content="Builders Archive — Step-by-Step 3D Lego-Style Builds">
 
-  <!-- Inter Font -->
+  <!-- Inter Web Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
-  <!-- Tailwind CSS CDN for instant styling support -->
+  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- Traditional CSS Stylesheet -->
   <link rel="stylesheet" href="./css/styles.css">
 </head>
-<body class="bg-black text-white min-h-screen m-0 p-0 overflow-x-hidden">
+<body>
 
-  <!-- Background Three.js Canvas Container -->
-  <div id="three-canvas-container" aria-hidden="true"></div>
+  <div class="page-wrapper">
 
-  <!-- Center-aligned Main Viewport -->
-  <main class="app-container">
-    <div class="w-full max-w-3xl mx-auto p-3">
-      <div class="bg-[#1e1e1e] border border-white/10 rounded-3xl p-3 shadow-xl focus-within:border-white/25 transition-all">
-        <textarea
-          id="chatInputTextarea"
-          rows="2"
-          placeholder="Message anything..."
-          class="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
-        ></textarea>
+    <!-- 1. LANDING VIEW: Minimalist Black Background with Centered AIChatInput -->
+    <section class="landing-view" id="landingViewSection">
+      <!-- Minimalist Header Badge -->
+      <div class="flex items-center gap-2 mb-6 text-gray-500 font-mono text-xs uppercase tracking-widest select-none">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+          <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        </svg>
+        <span>Builders Archive · 3D Model Generator</span>
+      </div>
 
-        <div class="flex items-center justify-between px-1 pt-2">
-          <div class="flex items-center gap-2">
-            <button
-              id="chatPlusBtn"
-              type="button"
-              class="p-2 rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition"
-              aria-label="Add attachment"
-            >
-              <!-- Plus icon (size 20) -->
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M5 12h14"></path>
-                <path d="M12 5v14"></path>
-              </svg>
-            </button>
-            <span class="text-xs text-gray-500 select-none">
-              Ask anything
-            </span>
-          </div>
+      <!-- The Center-Aligned AIChatInput Component -->
+      <div class="w-full max-w-3xl mx-auto p-3">
+        <div class="bg-[#1e1e1e] border border-white/10 rounded-3xl p-3 shadow-xl focus-within:border-white/25 transition-all">
+          <textarea
+            id="chatInputTextarea"
+            rows="2"
+            placeholder="Message anything..."
+            class="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
+          ></textarea>
 
-          <div class="flex items-center gap-2">
-            <button
-              id="chatMicBtn"
-              type="button"
-              class="p-2 rounded-full text-gray-400 hover:bg-white/10 transition"
-              aria-label="Voice input"
-            >
-              <!-- Mic icon (size 19) -->
-              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" x2="12" y1="19" y2="22"></line>
-              </svg>
-            </button>
-            <button
-              id="chatSendBtn"
-              type="button"
-              disabled
-              class="p-3 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
-              aria-label="Send message"
-            >
-              <!-- ArrowUp icon (size 19) -->
-              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m5 12 7-7 7 7"></path>
-                <path d="M12 19V5"></path>
-              </svg>
-            </button>
+          <div class="flex items-center justify-between px-1 pt-2">
+            <div class="flex items-center gap-2">
+              <button
+                id="chatPlusBtn"
+                type="button"
+                class="p-2 rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition"
+                aria-label="Add attachment"
+              >
+                <!-- Plus icon (size 20) -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12h14"></path>
+                  <path d="M12 5v14"></path>
+                </svg>
+              </button>
+              <span class="text-xs text-gray-500 select-none">
+                Ask anything
+              </span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                id="chatMicBtn"
+                type="button"
+                class="p-2 rounded-full text-gray-400 hover:bg-white/10 transition"
+                aria-label="Voice input"
+              >
+                <!-- Mic icon (size 19) -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" x2="12" y1="19" y2="22"></line>
+                </svg>
+              </button>
+              <button
+                id="chatSendBtn"
+                type="button"
+                disabled
+                class="p-3 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                aria-label="Send message"
+              >
+                <!-- ArrowUp icon (size 19) -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m5 12 7-7 7 7"></path>
+                  <path d="M12 19V5"></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  </main>
+
+      <!-- Demo Suggestion Prompt Chip -->
+      <div class="mt-4 flex items-center justify-center">
+        <button type="button" class="demo-chip-btn" id="demoPromptChip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+          <span>Try demo: <strong style="color: #ffffff; font-weight: 500;">"Hey I want to build a desk"</strong></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 2. CONVERSATION VIEW: Active Chat with Interactive 3D Lego Manual -->
+    <section class="chat-view" id="chatViewSection" style="display: none;">
+      <!-- Header -->
+      <div class="chat-header">
+        <div class="flex items-center gap-2">
+          <span style="width: 10px; height: 10px; border-radius: 9999px; background-color: #10b981; display: inline-block;"></span>
+          <span style="font-weight: 600; font-size: 14px; letter-spacing: 0.02em; color: #ffffff;">Builders Archive 3D Assistant</span>
+        </div>
+        <button type="button" id="clearChatBtn" style="font-size: 12px; color: #9ca3af; font-family: monospace; background: none; border: none; cursor: pointer;">
+          Clear Conversation
+        </button>
+      </div>
+
+      <!-- Message Stream -->
+      <div class="chat-messages-list">
+        <!-- User Message -->
+        <div class="msg-row user">
+          <div class="bubble user" id="userMsgTextDisplay">
+            Hey I want to build a desk
+          </div>
+          <div class="avatar user-av">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+        </div>
+
+        <!-- Assistant Message with 3D Lego Manual -->
+        <div class="msg-row assistant">
+          <div class="avatar bot">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 9h.01M15 9h.01M9 15h6"/></svg>
+          </div>
+          <div class="bubble assistant">
+            <div class="text-card">
+              Here is your step-by-step 3D assembly manual for the <strong>Modern Solid Oak Desk (1200 × 700 × 750 mm)</strong>. Flip through each step like a Lego instruction book to see the exact parts and 3D assembly animations. You can click & drag to rotate 360°, scroll/pinch to zoom, and inspect every component.
+            </div>
+
+            <!-- 3D LEGO VIEWER BOX -->
+            <div class="desk-viewer-box">
+              <!-- Three.js Canvas -->
+              <div class="canvas-viewport" id="desk3DCanvas"></div>
+
+              <!-- Lego Parts Callout Card (Top-Left) -->
+              <div class="lego-callout-card" id="legoCardContainer">
+                <!-- Dynamically populated by app.js -->
+              </div>
+
+              <!-- View Presets (Top-Right) -->
+              <div class="view-controls-bar">
+                <button type="button" class="view-preset-btn" id="preset-iso" title="Isometric View">Iso</button>
+                <button type="button" class="view-preset-btn" id="preset-front" title="Front View">Front</button>
+                <button type="button" class="view-preset-btn" id="preset-top" title="Top View">Top</button>
+                <button type="button" class="view-preset-btn" id="preset-side" title="Side View">Side</button>
+                <div style="width: 1px; height: 16px; background-color: rgba(255, 255, 255, 0.2); margin: 0 4px;"></div>
+                <button type="button" class="view-preset-btn" id="btnToggleSpin" title="Auto-Spin 3D Model">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                </button>
+              </div>
+
+              <!-- Controls Hint Badge -->
+              <div style="position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 10; pointer-events: none; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.1); color: #9ca3af; font-size: 11px; padding: 4px 12px; border-radius: 9999px; display: flex; gap: 8px;">
+                <span>Drag to rotate</span><span>•</span><span>Scroll / Pinch to zoom</span><span>•</span><span>Right-drag to pan</span>
+              </div>
+
+              <!-- Bottom Lego Controller Bar -->
+              <div class="lego-controller">
+                <!-- Step Pills Row -->
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                  <div id="stepPillsRow" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+                  <span id="stepCounterDisplay" style="font-size: 12px; font-family: monospace; color: #9ca3af;">Step 1 of 6</span>
+                </div>
+
+                <!-- Step Info & Flipping Controls -->
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+                  <div style="flex: 1; min-width: 240px;">
+                    <h3 id="stepTitleDisplay" style="margin: 0; font-size: 16px; font-weight: 700; color: #ffffff;">Stand the 4 Heavy-Duty Legs</h3>
+                    <p id="stepDescDisplay" style="margin: 4px 0 0 0; font-size: 12px; color: #9ca3af; line-height: 1.4;">Stand the four solid oak legs on your workspace.</p>
+                  </div>
+
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" class="btn-nav-prev" id="btnStepPrev" disabled>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                      Previous
+                    </button>
+                    <button type="button" class="btn-nav-next" id="btnStepNext">
+                      Next Step
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Pinned Chat Input at Bottom -->
+      <div style="position: sticky; bottom: 0; padding-top: 10px; background: linear-gradient(to top, #000000 70%, transparent);">
+        <div class="w-full max-w-3xl mx-auto p-3">
+          <div class="bg-[#1e1e1e] border border-white/10 rounded-3xl p-3 shadow-xl focus-within:border-white/25 transition-all">
+            <textarea
+              id="pinnedChatInputTextarea"
+              rows="2"
+              placeholder="Ask anything about the build or dimensions..."
+              class="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
+            ></textarea>
+            <div class="flex items-center justify-between px-1 pt-2">
+              <div class="flex items-center gap-2">
+                <button type="button" class="p-2 rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5v14"/></svg>
+                </button>
+                <span class="text-xs text-gray-500">Ask anything</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="p-2 rounded-full text-gray-400 hover:bg-white/10 transition">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+                <button
+                  id="pinnedChatSendBtn"
+                  type="button"
+                  disabled
+                  class="p-3 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                >
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
 
   <!-- Three.js (r128) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

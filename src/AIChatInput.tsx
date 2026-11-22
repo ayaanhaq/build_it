@@ -1,12 +1,24 @@
 import { useState } from "react";
 import { Plus, ArrowUp, Mic } from "lucide-react";
 
-export default function AIChatInput() {
+interface AIChatInputProps {
+  onSendMessage?: (message: string) => void;
+  placeholder?: string;
+  initialValue?: string;
+}
+
+export default function AIChatInput({
+  onSendMessage,
+  placeholder = "Message anything...",
+}: AIChatInputProps) {
   const [message, setMessage] = useState("");
 
   const handleSend = () => {
     if (!message.trim()) return;
     console.log("Message sent:", message);
+    if (onSendMessage) {
+      onSendMessage(message);
+    }
     setMessage("");
   };
 
@@ -22,7 +34,7 @@ export default function AIChatInput() {
               handleSend();
             }
           }}
-          placeholder="Message anything..."
+          placeholder={placeholder}
           rows={2}
           className="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
         />

@@ -1,6 +1,6 @@
 /* ==========================================================================
    Builders Archive — Traditional Web Tech Stack
-   Clean, modern, minimalist styling matching Tailwind CSS utility conventions.
+   Minimalist Dark Architecture · Tailwind Conventions · 3D Lego Manual
    ========================================================================== */
 
 *,
@@ -28,38 +28,364 @@ body {
   overflow-x: hidden;
 }
 
-/* Main Viewport Centering */
-.app-container {
+/* Page Layout */
+.page-wrapper {
   min-height: 100vh;
   width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  justify-content: space-between;
   padding: 1.5rem;
   background-color: #000000;
   position: relative;
-  z-index: 10;
 }
 
-/* Background 3D Canvas (Three.js integration) */
-#three-canvas-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 1;
-  pointer-events: none;
-  background: transparent;
+@media (min-width: 768px) {
+  .page-wrapper {
+    padding: 2rem;
+  }
 }
 
-/* Component Classes matching exact Tailwind names */
+/* Initial Centered Landing View */
+.landing-view {
+  min-height: calc(100vh - 3rem);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 52rem;
+}
+
+/* Chat Conversation Stream View */
+.chat-view {
+  width: 100%;
+  max-width: 64rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 1.5rem;
+}
+
+.chat-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+  margin-bottom: 2rem;
+}
+
+.msg-row {
+  display: flex;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+.msg-row.assistant {
+  justify-content: flex-start;
+}
+
+.avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.avatar.bot {
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+
+.avatar.user-av {
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.bubble {
+  max-width: 48rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.bubble.user {
+  background-color: #ffffff;
+  color: #000000;
+  font-weight: 500;
+  border-radius: 1rem;
+  border-top-right-radius: 0.25rem;
+  padding: 0.75rem 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+.bubble.assistant {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.bubble.assistant .text-card {
+  background-color: #18191c;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  border-top-left-radius: 0.25rem;
+  padding: 1rem;
+  color: #e5e7eb;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+/* 3D Lego Viewer Container */
+.desk-viewer-box {
+  position: relative;
+  width: 100%;
+  height: 640px;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background-color: #0a0a0c;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .desk-viewer-box {
+    height: 700px;
+  }
+}
+
+.canvas-viewport {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  cursor: grab;
+  outline: none;
+}
+
+.canvas-viewport:active {
+  cursor: grabbing;
+}
+
+/* Lego Parts Callout Card (Top-Left) */
+.lego-callout-card {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 20;
+  width: 100%;
+  max-width: 22rem;
+  pointer-events: auto;
+  background-color: rgba(24, 25, 28, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+}
+
+.lego-step-badge {
+  background-color: #f59e0b;
+  color: #000000;
+  font-weight: 800;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.375rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lego-part-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  transition: background-color 0.15s ease;
+}
+
+.lego-part-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.qty-badge {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Viewport Controls (Top-Right) */
+.view-controls-bar {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: rgba(24, 25, 28, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.35rem;
+  border-radius: 1rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+}
+
+.view-preset-btn {
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #d1d5db;
+  transition: all 0.15s ease;
+}
+
+.view-preset-btn:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Bottom Controller */
+.lego-controller {
+  position: relative;
+  z-index: 20;
+  background-color: rgba(18, 19, 22, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1rem 1.25rem;
+  color: #ffffff;
+}
+
+.step-pill-btn {
+  height: 1.75rem;
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.15s ease;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #9ca3af;
+}
+
+.step-pill-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.step-pill-btn.active {
+  background-color: #f59e0b;
+  color: #000000;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.25);
+  transform: scale(1.04);
+}
+
+.step-pill-btn.completed {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.btn-nav-prev {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.75rem;
+  transition: background-color 0.15s ease;
+}
+
+.btn-nav-prev:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-nav-prev:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.btn-nav-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: #f59e0b;
+  color: #000000;
+  font-weight: 700;
+  font-size: 0.75rem;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.2);
+}
+
+.btn-nav-next:hover {
+  background-color: #fbbf24;
+}
+
+/* Suggestion Demo Chip */
+.demo-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+  color: #9ca3af;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+.demo-chip-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* AIChatInput Component Classes */
 .w-full {
   width: 100%;
 }
 
 .max-w-3xl {
-  max-width: 48rem; /* 768px */
+  max-width: 48rem;
 }
 
 .mx-auto {
@@ -68,7 +394,7 @@ body {
 }
 
 .p-3 {
-  padding: 0.75rem; /* 12px */
+  padding: 0.75rem;
 }
 
 .px-1 {
@@ -108,7 +434,7 @@ body {
 }
 
 .rounded-3xl {
-  border-radius: 1.5rem; /* 24px */
+  border-radius: 1.5rem;
 }
 
 .rounded-full {

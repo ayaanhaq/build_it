@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Builders Archive</title>
-  <meta name="description" content="Builders Archive — Traditional Web Tech Stack">
+  <title>Builders Archive — 3D Desk Build</title>
+  <meta name="description" content="Builders Archive — Step-by-Step 3D Lego-Style Builds">
 
-  <!-- Inter Font -->
+  <!-- Inter Web Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -18,79 +18,17 @@
   <link rel="stylesheet" href="./frontend/css/styles.css">
 </head>
 <body class="bg-black text-white min-h-screen m-0 p-0 overflow-x-hidden">
-
-  <!-- Background Three.js Canvas Container -->
-  <div id="three-canvas-container" aria-hidden="true"></div>
-
-  <!-- Center-aligned Main Container -->
-  <div id="root">
-    <main class="app-container">
-      <div class="w-full max-w-3xl mx-auto p-3">
-        <div class="bg-[#1e1e1e] border border-white/10 rounded-3xl p-3 shadow-xl focus-within:border-white/25 transition-all">
-          <textarea
-            id="chatInputTextarea"
-            rows="2"
-            placeholder="Message anything..."
-            class="w-full bg-transparent text-white placeholder-gray-500 outline-none resize-none px-3 py-2 text-base"
-          ></textarea>
-
-          <div class="flex items-center justify-between px-1 pt-2">
-            <div class="flex items-center gap-2">
-              <button
-                id="chatPlusBtn"
-                type="button"
-                class="p-2 rounded-full text-gray-400 hover:bg-white/10 hover:text-white transition"
-                aria-label="Add attachment"
-              >
-                <!-- Plus icon (size 20) -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M5 12h14"></path>
-                  <path d="M12 5v14"></path>
-                </svg>
-              </button>
-              <span class="text-xs text-gray-500 select-none">
-                Ask anything
-              </span>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <button
-                id="chatMicBtn"
-                type="button"
-                class="p-2 rounded-full text-gray-400 hover:bg-white/10 transition"
-                aria-label="Voice input"
-              >
-                <!-- Mic icon (size 19) -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                  <line x1="12" x2="12" y1="19" y2="22"></line>
-                </svg>
-              </button>
-              <button
-                id="chatSendBtn"
-                type="button"
-                disabled
-                class="p-3 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
-                aria-label="Send message"
-              >
-                <!-- ArrowUp icon (size 19) -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m5 12 7-7 7 7"></path>
-                  <path d="M12 19V5"></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
-  </div>
-
-  <!-- Traditional Vanilla JavaScript Application -->
-  <script type="module" src="./frontend/js/app.js"></script>
+  <!-- React App Root Container -->
+  <div id="root"></div>
 
   <!-- Vite / TypeScript module entry point -->
   <script type="module" src="/src/main.tsx"></script>
+
+  <!-- Fallback if opened as static file:// without bundler -->
+  <script>
+    if (window.location.protocol === 'file:') {
+      window.location.replace("./frontend/index.html");
+    }
+  </script>
 </body>
 </html>

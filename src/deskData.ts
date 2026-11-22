@@ -1,0 +1,211 @@
+import { BuildStep } from "./types";
+
+export const DESK_BUILD_STEPS: BuildStep[] = [
+  {
+    stepNumber: 1,
+    title: "Stand the 4 Heavy-Duty Legs",
+    subtitle: "Base Foundation · 4× Legs + Leveling Feet",
+    description:
+      "Stand the four solid oak legs on your workspace. Screw the rubberized leveling glides into the pre-threaded inserts at the bottom of each leg.",
+    proTip: "Make sure all four leveling glides are turned in completely before building upward.",
+    parts: [
+      {
+        id: "p1-legs",
+        name: "Solid Oak Leg Posts",
+        qty: "4×",
+        dimensions: "720 × 55 × 55 mm",
+        material: "Kiln-dried White Oak",
+        color: "#b08552",
+        iconType: "leg",
+      },
+      {
+        id: "p1-glides",
+        name: "Brass Leveling Glides",
+        qty: "4×",
+        dimensions: "Ø30 × 20 mm",
+        material: "Rubberized Brass",
+        color: "#d4af37",
+        iconType: "hardware",
+      },
+    ],
+    cameraPreset: {
+      distance: 90,
+      phi: 1.1,
+      theta: 0.6,
+    },
+  },
+  {
+    stepNumber: 2,
+    title: "Assemble Side Apron Frames",
+    subtitle: "Side Assembly · Left & Right Side Rails",
+    description:
+      "Bridge each pair of front and rear legs with the side apron rails. Insert the wooden dowels and tighten the internal steel cam fasteners.",
+    proTip: "Check for a 90° square angle against the floor before fully torquing the fasteners.",
+    parts: [
+      {
+        id: "p2-aprons",
+        name: "Side Apron Rails",
+        qty: "2×",
+        dimensions: "440 × 80 × 28 mm",
+        material: "Solid White Oak",
+        color: "#c29660",
+        iconType: "rail",
+      },
+      {
+        id: "p2-dowels",
+        name: "Fluted Hardwood Dowels",
+        qty: "8×",
+        dimensions: "Ø10 × 40 mm",
+        material: "Compressed Beech",
+        color: "#dfba89",
+        iconType: "hardware",
+      },
+    ],
+    cameraPreset: {
+      distance: 85,
+      phi: 1.0,
+      theta: 1.2,
+    },
+  },
+  {
+    stepNumber: 3,
+    title: "Install Main Spine & Stretchers",
+    subtitle: "Chassis Rigidification · Front & Rear Beams",
+    description:
+      "Connect the left and right side frames using the front and rear longitudinal stretchers, reinforced with steel corner gusset brackets.",
+    proTip: "This sub-frame gives the desk immense rigidity and prevents lateral racking.",
+    parts: [
+      {
+        id: "p3-stretchers",
+        name: "Longitudinal Stretchers",
+        qty: "2×",
+        dimensions: "840 × 75 × 28 mm",
+        material: "Solid White Oak",
+        color: "#b98c56",
+        iconType: "stretcher",
+      },
+      {
+        id: "p3-brackets",
+        name: "Steel Corner Gussets",
+        qty: "4×",
+        dimensions: "60 × 60 × 3 mm",
+        material: "Matte Black Carbon Steel",
+        color: "#2b2c30",
+        iconType: "hardware",
+      },
+    ],
+    cameraPreset: {
+      distance: 95,
+      phi: 0.9,
+      theta: 0.8,
+    },
+  },
+  {
+    stepNumber: 4,
+    title: "Mount the Solid Wood Desktop",
+    subtitle: "Tabletop Installation · Seamless Surface",
+    description:
+      "Lower the solid oak desktop slab onto the assembled base. Fasten from beneath using the slotted expansion clips that allow natural wood movement.",
+    proTip: "Always tighten fasteners from underneath using figure-eight fasteners or slotted clips.",
+    parts: [
+      {
+        id: "p4-desktop",
+        name: "Solid Oak Desktop Surface",
+        qty: "1×",
+        dimensions: "1200 × 700 × 35 mm",
+        material: "Edge-Glued White Oak",
+        color: "#d0a169",
+        iconType: "slab",
+      },
+      {
+        id: "p4-clips",
+        name: "Tabletop Expansion Clips",
+        qty: "8×",
+        dimensions: "35 × 18 mm",
+        material: "Zinc Plated Steel",
+        color: "#8a9199",
+        iconType: "hardware",
+      },
+    ],
+    cameraPreset: {
+      distance: 105,
+      phi: 0.8,
+      theta: 0.5,
+    },
+  },
+  {
+    stepNumber: 5,
+    title: "Attach Under-Desk Drawer Module",
+    subtitle: "Storage Unit · Ball-Bearing Slides & Casing",
+    description:
+      "Fasten the suspended drawer chassis under the right side of the desk. Insert the dovetailed drawer box onto the smooth ball-bearing runners.",
+    proTip: "Test drawer extension and ensure smooth glide action before installing hardware.",
+    parts: [
+      {
+        id: "p5-casing",
+        name: "Drawer Enclosure Housing",
+        qty: "1×",
+        dimensions: "340 × 420 × 120 mm",
+        material: "Solid Oak & Veneer",
+        color: "#9c7241",
+        iconType: "drawer",
+      },
+      {
+        id: "p5-drawer",
+        name: "Dovetailed Drawer Box",
+        qty: "1×",
+        dimensions: "300 × 390 × 90 mm",
+        material: "Walnut Core",
+        color: "#6b4929",
+        iconType: "drawer",
+      },
+      {
+        id: "p5-handle",
+        name: "Anodized Pull Handle",
+        qty: "1×",
+        dimensions: "120 × 15 × 12 mm",
+        material: "Matte Black Aluminum",
+        color: "#1e1e1e",
+        iconType: "hardware",
+      },
+    ],
+    cameraPreset: {
+      distance: 80,
+      phi: 1.1,
+      theta: 0.35,
+    },
+  },
+  {
+    stepNumber: 6,
+    title: "Cable Tray & Final Polish",
+    subtitle: "Complete Build · Cable Raceway & Desk Mat",
+    description:
+      "Snap the rear steel wire management raceway underneath the rear apron. Place the full-grain leather desk pad. Your desk is now fully assembled!",
+    proTip: "Use the rear wire tray to route monitor power and peripherals invisibly.",
+    parts: [
+      {
+        id: "p6-tray",
+        name: "Under-Desk Cable Raceway",
+        qty: "1×",
+        dimensions: "700 × 100 × 60 mm",
+        material: "Powder-Coated Steel",
+        color: "#222326",
+        iconType: "accessory",
+      },
+      {
+        id: "p6-mat",
+        name: "Full-Grain Leather Desk Pad",
+        qty: "1×",
+        dimensions: "800 × 400 × 3 mm",
+        material: "Charcoal Leatherette",
+        color: "#1c1c1e",
+        iconType: "accessory",
+      },
+    ],
+    cameraPreset: {
+      distance: 100,
+      phi: 0.85,
+      theta: 0.7,
+    },
+  },
+];
