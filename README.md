@@ -13,6 +13,7 @@ A deterministic electrical safety checker and instruction generator for physical
 
 - [Quick Start](#quick-start)
   - [Requirements](#requirements)
+  - [PDF Extraction Backends](#pdf-extraction-backends)
   - [Running Tests](#running-tests)
   - [Running the CLI](#running-the-cli)
 - [System Architecture](#system-architecture)
@@ -29,6 +30,7 @@ A deterministic electrical safety checker and instruction generator for physical
 - [Branch Sitemap](#branch-sitemap)
 - [Electrical Safety Rules](#electrical-safety-rules)
 - [Netlist & Component Library Specification](#netlist--component-library-specification)
+  - [How to Add a Part](#how-to-add-a-part)
 - [Contributing & Testing Workflow](#contributing--testing-workflow)
 
 ---
@@ -38,6 +40,11 @@ A deterministic electrical safety checker and instruction generator for physical
 ### Requirements
 - **Python 3.8+** (standard library only for the core rule checker; zero required third-party dependencies).
 - Optional datasheet ingestion and schema validation tools utilize `pypdf` and `jsonschema` when available.
+
+### PDF Extraction Backends
+The datasheet ingestion module (`datasheet_ingest.py`) supports local PDF ingestion and SHA-256 provenance calculation:
+- **`pypdf`** (default, currently supported): Pure Python library for page extraction and document metadata.
+- **`PyMuPDF` (`fitz`)** / **`pdfplumber`**: Modular backend adapter stubs are implemented. Both remain pending user approval before being added as optional dependencies.
 
 ### Running Tests
 Execute the complete unittest suite (42 tests on `main`, 62 tests on `phase-1-on-demand-parts`):
@@ -385,7 +392,39 @@ The deterministic checker in `checker.py` evaluates the following rules:
 }
 ```
 
-### Component Definition (`parts.json`)
+- **`name`** *(string)*: Name of the circuit build.
+- **`parts`** *(dict)*: Maps component instance IDs to component types defined in `parts.json`.
+- **`values`** *(dict)*: Parameter values for components, such as resistance in Ohms for resistors (`"r1": 330`).
+- **`nets`** *(dict)*: Electrical nets mapping net names to lists of connected pins in `<part_id>.<pin>` notation.
+
+---
+
+### How to Add a Part
+
+Components are defined in `parts.json`.
+
+#### Schema
+Each part entry contains:
+- **`is_sensor`** *(bool, optional)*: Explicit boolean indicating if the part is a sensor module.
+- **`pins`** *(dict)*: Map of pin names to pin definitions.
+  - **`role`** *(string)*: One of `gpio`, `power`, `ground`, `anode`, `cathode`, `output`, or `passive`.
+  - **`level`** *(float, optional)*: Logic voltage level in Volts (e.g., `3.3` or `5.0`).
+  - **`v`** *(float, optional)*: Supply rail voltage in Volts (e.g., `5.0`).
+  - **`max_source_ma`** *(float or "UNVERIFIED")*: Maximum current the pin can source in mA.
+  - **`max_sink_ma`** *(float or "UNVERIFIED")*: Maximum current the pin can sink in mA.
+- **Component-level attributes**:
+  - `vf`: Forward voltage drop in Volts (for LEDs/diodes).
+  - `vbe`: Base-emitter saturation voltage drop in Volts (for transistors, e.g. 0.7).
+  - `max_ma`: Maximum rated continuous forward current in mA.
+  - `has_driver_transistor`: Boolean indicating onboard driver transistor.
+  - `has_flyback_diode`: Boolean indicating onboard inductive flyback diode.
+- **Documentation & Citations**:
+  - Always include a `_comment` citing the datasheet source and value for each limit.
+  - If a value cannot be verified from a reliable datasheet, set it to `"UNVERIFIED"` rather than guessing.
+  - **Fail-Closed Safety Rule**: If an absolute maximum rating on a GPIO pin (`max_source_ma`, `level`) or power pin (`v`, `max_source_ma`) is `"UNVERIFIED"`, `checker.py` rejects the design with a blocking error. Hardware safety requires verified limits for safety-critical MCU and power pins.
+  - For non-critical driver/sensor pins (e.g. `role: "output"` on a sensor or `max_sink_ma` on an input), `checker.py` applies a conservative default placeholder (`DEFAULT_UNVERIFIED_MAX_SOURCE_MA = 8.0` mA) and issues a warning. Warnings do not fail the design unless the calculated current exceeds this conservative limit.
+
+### Component Definition Example (`parts.json`)
 ```json
 "pir_sensor": {
   "_comment": "HC-SR501 PIR Motion Detector Module. Source: Datasheet Rev 1.0.",
