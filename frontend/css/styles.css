@@ -379,6 +379,12 @@ body {
   color: #ffffff;
 }
 
+#stepCounterDisplay {
+  white-space: nowrap !important;
+  display: inline-block;
+  user-select: none;
+}
+
 .step-pill-btn {
   height: 1.75rem;
   padding: 0 0.75rem;

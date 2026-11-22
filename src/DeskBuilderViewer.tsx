@@ -113,7 +113,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
       <div className="relative z-20 bg-[#121316]/95 backdrop-blur-md border-t border-white/10 p-4 md:p-5 text-white">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex-1 min-w-0 pr-4">
-            <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider block mb-1">
+            <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider inline-block mb-1 whitespace-nowrap">
               Step {currentStep} of {totalSteps}
             </span>
             <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2 truncate">
