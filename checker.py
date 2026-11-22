@@ -60,7 +60,35 @@ def check_with_warnings(netlist, lib):
     if errors:
         return errors, warnings
 
-    # 2. Pin on at most one net
+    # 2. Fail-closed on ambiguous electrical specs for safety-critical pins
+    # If datasheet extraction leaves an absolute maximum unverified on a GPIO or power pin, REJECT the design.
+    # Conservative defaults are reserved for operating estimates on general driver/output/sink pins, not limits.
+    checked_pins = set()
+    for net_name, pin_list in nets.items():
+        for pin_ref in pin_list:
+            if pin_ref in checked_pins:
+                continue
+            checked_pins.add(pin_ref)
+            _, _, pinfo = _get_pin_info(pin_ref, parts, lib)
+            if not pinfo:
+                continue
+            role = pinfo.get("role")
+            if role == "gpio":
+                for field in ("max_source_ma", "level"):
+                    if pinfo.get(field) == "UNVERIFIED":
+                        errors.append(
+                            f"Fail-closed: GPIO pin '{pin_ref}' has unverified absolute maximum '{field}'; "
+                            "hardware safety requires verified limit"
+                        )
+            elif role == "power":
+                for field in ("v", "max_source_ma"):
+                    if pinfo.get(field) == "UNVERIFIED":
+                        errors.append(
+                            f"Fail-closed: Power pin '{pin_ref}' has unverified absolute maximum '{field}'; "
+                            "hardware safety requires verified limit"
+                        )
+
+    # 3. Pin on at most one net
     seen_pins = {}
     for net_name, pin_list in nets.items():
         for pin_ref in pin_list:
@@ -223,7 +251,7 @@ def check_with_warnings(netlist, lib):
                         vbe = cinfo.get("vbe", 0.7)
                         v_gpio = ginfo.get("level", 3.3)
                         r_ohms = values.get(resistor_part_id, 0)
-                        if r_ohms and r_ohms > 0:
+                        if isinstance(v_gpio, (int, float)) and r_ohms and r_ohms > 0:
                             base_current_ma = (v_gpio - vbe) / r_ohms * 1000.0
                             raw_max = ginfo.get("max_source_ma")
                             if raw_max == "UNVERIFIED":
@@ -306,7 +334,7 @@ def check_with_warnings(netlist, lib):
                 v = driver_info.get("v")
 
                 v_source = level if level is not None else v
-                if v_source is not None:
+                if isinstance(v_source, (int, float)):
                     vf = lib.get("led", {}).get("vf", 2.0)
                     r_ohms = values.get(resistor_part_id, 0)
                     if r_ohms and r_ohms > 0:
