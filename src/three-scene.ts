@@ -1,5 +1,15 @@
 import * as THREE from "three";
-import { DESK_BUILD_STEPS } from "./deskData";
+import { DESK_BUILD_STEPS } from "./deskData.ts";
+import type {
+  Scene,
+  ScenePart,
+  ScenePrimitiveType,
+  BoxDimensions,
+  CylinderDimensions,
+  LatheDimensions,
+  BevelDimensions,
+  SpringDimensions,
+} from "./types";
 
 /**
  * HeyClicky-Inspired REAL_TONES Palette
@@ -30,9 +40,388 @@ export const REAL_TONES = {
 export interface ThreeDeskViewerOptions {
   container: HTMLElement;
   initialStep?: number;
+  scene?: Scene;
   onStepChange?: (step: number) => void;
   onPartHover?: (partName: string | null, screenX: number, screenY: number) => void;
   onPartClick?: (partName: string) => void;
+}
+
+/**
+ * Dedicated primitive builder functions mapping Scene schema geometries to Three.js BufferGeometry.
+ */
+export function buildBoxGeometry(dim: BoxDimensions): THREE.BufferGeometry {
+  return new THREE.BoxGeometry(dim.width, dim.height, dim.depth);
+}
+
+export function buildCylinderGeometry(dim: CylinderDimensions): THREE.BufferGeometry {
+  const rt = dim.radiusTop ?? dim.radius ?? 1;
+  const rb = dim.radiusBottom ?? dim.radius ?? 1;
+  const h = dim.height;
+  const segs = dim.radialSegments ?? 24;
+  return new THREE.CylinderGeometry(rt, rb, h, segs);
+}
+
+export function buildLatheGeometry(dim: LatheDimensions): THREE.BufferGeometry {
+  const r = dim.radius;
+  const h = dim.height;
+  const segments = dim.segments ?? 24;
+  const points: THREE.Vector2[] = [
+    new THREE.Vector2(0, -h / 2),
+    new THREE.Vector2(r * 0.8, -h / 2),
+    new THREE.Vector2(r, -h / 4),
+    new THREE.Vector2(r, h / 4),
+    new THREE.Vector2(r * 0.8, h / 2),
+    new THREE.Vector2(0, h / 2),
+  ];
+  return new THREE.LatheGeometry(points, segments);
+}
+
+export function buildBevelGeometry(dim: BevelDimensions): THREE.BufferGeometry {
+  const w = dim.width;
+  const h = dim.height;
+  const d = dim.depth;
+  const bevelSize = dim.bevelSize ?? 0;
+  const bevelThickness = dim.bevelThickness ?? bevelSize;
+
+  if (bevelSize > 0 || bevelThickness > 0) {
+    const shape = new THREE.Shape();
+    const halfW = w / 2 - bevelSize;
+    const halfD = d / 2 - bevelSize;
+    shape.moveTo(-halfW, -halfD);
+    shape.lineTo(halfW, -halfD);
+    shape.lineTo(halfW, halfD);
+    shape.lineTo(-halfW, halfD);
+    shape.closePath();
+
+    const extrudeHeight = Math.max(0.01, h - 2 * bevelThickness);
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: extrudeHeight,
+      bevelEnabled: true,
+      bevelSegments: 3,
+      steps: 1,
+      bevelSize,
+      bevelThickness,
+    });
+    geo.center();
+    geo.rotateX(Math.PI / 2);
+    return geo;
+  }
+  return new THREE.BoxGeometry(w, h, d);
+}
+
+class HelixCurve extends THREE.Curve<THREE.Vector3> {
+  radius: number;
+  height: number;
+  coils: number;
+
+  constructor(radius: number, height: number, coils: number) {
+    super();
+    this.radius = radius;
+    this.height = height;
+    this.coils = coils;
+  }
+  getPoint(t: number, optionalTarget = new THREE.Vector3()): THREE.Vector3 {
+    const angle = 2 * Math.PI * this.coils * t;
+    const x = this.radius * Math.cos(angle);
+    const y = (t - 0.5) * this.height;
+    const z = this.radius * Math.sin(angle);
+    return optionalTarget.set(x, y, z);
+  }
+}
+
+export function buildSpringGeometry(dim: SpringDimensions): THREE.BufferGeometry {
+  const r = dim.radius;
+  const h = dim.height;
+  const coils = dim.coils ?? 5;
+  const wireRadius = dim.wireRadius ?? Math.min(r * 0.1, 1.0);
+  const path = new HelixCurve(r, h, coils);
+  const tubularSegments = Math.min(256, Math.max(32, coils * 32));
+  return new THREE.TubeGeometry(path, tubularSegments, wireRadius, 8, false);
+}
+
+/**
+ * Dispatch table mapping each primitive type to its geometry builder function.
+ */
+export const PRIMITIVE_BUILDERS: Record<ScenePrimitiveType, (dimensions: any) => THREE.BufferGeometry> = {
+  box: (d) => buildBoxGeometry(d as BoxDimensions),
+  cylinder: (d) => buildCylinderGeometry(d as CylinderDimensions),
+  lathe: (d) => buildLatheGeometry(d as LatheDimensions),
+  bevel: (d) => buildBevelGeometry(d as BevelDimensions),
+  spring: (d) => buildSpringGeometry(d as SpringDimensions),
+};
+
+/**
+ * Resolves standard physical material parameters from descriptive material names.
+ */
+export function getMaterialParams(materialName: string = ""): { roughness: number; metalness: number } {
+  const lower = materialName.toLowerCase();
+  if (lower.includes("brass") || lower.includes("gold")) {
+    return { roughness: 0.22, metalness: 0.88 };
+  }
+  if (lower.includes("steel") || lower.includes("metal") || lower.includes("iron")) {
+    return { roughness: 0.42, metalness: 0.82 };
+  }
+  if (lower.includes("leather")) {
+    return { roughness: 0.85, metalness: 0.1 };
+  }
+  if (lower.includes("paper") || lower.includes("notebook")) {
+    return { roughness: 0.6, metalness: 0.05 };
+  }
+  if (lower.includes("walnut")) {
+    return { roughness: 0.42, metalness: 0.05 };
+  }
+  if (lower.includes("trim")) {
+    return { roughness: 0.2, metalness: 0.02 };
+  }
+  if (lower.includes("oak") || lower.includes("wood")) {
+    return { roughness: 0.38, metalness: 0.04 };
+  }
+  return { roughness: 0.35, metalness: 0.05 };
+}
+
+/**
+ * Builds Three.js meshes from a validated Scene contract.
+ * Each primitive maps to a builder function.
+ * Every mesh is routed through registerMesh.
+ */
+export function buildSceneModel(
+  scene: Scene,
+  registerMesh?: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
+): {
+  stepGroups: Map<number, THREE.Group>;
+  partMeshes: Map<string, THREE.Mesh>;
+  allInteractiveMeshes: THREE.Mesh[];
+  rootGroup: THREE.Group;
+} {
+  const stepGroups = new Map<number, THREE.Group>();
+  const partMeshes = new Map<string, THREE.Mesh>();
+  const allInteractiveMeshes: THREE.Mesh[] = [];
+  const rootGroup = new THREE.Group();
+
+  const handleRegister = registerMesh || ((mesh: THREE.Mesh, name: string, group: THREE.Group) => {
+    mesh.name = name;
+    mesh.userData = { partName: name };
+    group.add(mesh);
+    allInteractiveMeshes.push(mesh);
+    partMeshes.set(name, mesh);
+  });
+
+  for (const step of scene.steps) {
+    let group = stepGroups.get(step.stepNumber);
+    if (!group) {
+      group = new THREE.Group();
+      group.name = `Step-${step.stepNumber}-Group`;
+      stepGroups.set(step.stepNumber, group);
+      rootGroup.add(group);
+    }
+
+    for (const part of step.parts) {
+      const builder = PRIMITIVE_BUILDERS[part.primitive];
+      if (!builder) {
+        console.warn(`Unknown primitive builder for: ${part.primitive}`);
+        continue;
+      }
+
+      const geometry = builder(part.dimensions);
+      const hexColor = REAL_TONES[part.color] ?? REAL_TONES.tan;
+      const { roughness, metalness } = getMaterialParams(part.material);
+      const material = new THREE.MeshStandardMaterial({
+        color: hexColor,
+        roughness,
+        metalness,
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(part.position.x, part.position.y, part.position.z);
+      mesh.rotation.set(
+        THREE.MathUtils.degToRad(part.rotation.x),
+        THREE.MathUtils.degToRad(part.rotation.y),
+        THREE.MathUtils.degToRad(part.rotation.z)
+      );
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      handleRegister(mesh, part.name || part.id, group);
+    }
+  }
+
+  return { stepGroups, partMeshes, allInteractiveMeshes, rootGroup };
+}
+
+/**
+ * Legacy builder for the hand-built desk model.
+ * Maintained intact for geometric verification and regression comparisons.
+ */
+export function buildHandBuiltDeskModel(
+  registerMesh?: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
+): {
+  stepGroups: Map<number, THREE.Group>;
+  partMeshes: Map<string, THREE.Mesh>;
+  allInteractiveMeshes: THREE.Mesh[];
+  rootGroup: THREE.Group;
+} {
+  const stepGroups = new Map<number, THREE.Group>();
+  const partMeshes = new Map<string, THREE.Mesh>();
+  const allInteractiveMeshes: THREE.Mesh[] = [];
+  const rootGroup = new THREE.Group();
+
+  const handleRegister = registerMesh || ((mesh: THREE.Mesh, name: string, group: THREE.Group) => {
+    mesh.name = name;
+    mesh.userData = { partName: name };
+    group.add(mesh);
+    allInteractiveMeshes.push(mesh);
+    partMeshes.set(name, mesh);
+  });
+
+  const oakWoodMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.tan, roughness: 0.38, metalness: 0.04 });
+  const brassMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.sun, roughness: 0.22, metalness: 0.88 });
+  const darkSteelMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.ink, roughness: 0.42, metalness: 0.82 });
+  const walnutMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.brown, roughness: 0.42, metalness: 0.05 });
+
+  // STEP 1: 4 Legs + Brass Leveling Glides
+  const group1 = new THREE.Group();
+  rootGroup.add(group1);
+  const lx = 35, lz = 18, lh = 32, lt = 2.4;
+  const legGeo = new THREE.BoxGeometry(lt, lh, lt);
+  const glideGeo = new THREE.CylinderGeometry(1.2, 1.4, 0.8, 24);
+
+  const legCoords = [
+    [-lx, lz, "Front-Left Leg Post"],
+    [lx, lz, "Front-Right Leg Post"],
+    [-lx, -lz, "Rear-Left Leg Post"],
+    [lx, -lz, "Rear-Right Leg Post"],
+  ] as const;
+
+  legCoords.forEach(([x, z, name]) => {
+    const legMesh = new THREE.Mesh(legGeo, oakWoodMat.clone());
+    legMesh.position.set(x, lh / 2 + 0.8, z);
+    legMesh.castShadow = true;
+    legMesh.receiveShadow = true;
+    handleRegister(legMesh, name, group1);
+
+    const glideMesh = new THREE.Mesh(glideGeo, brassMat.clone());
+    glideMesh.position.set(x, 0.4, z);
+    glideMesh.castShadow = true;
+    handleRegister(glideMesh, `${name} Brass Glide`, group1);
+  });
+  stepGroups.set(1, group1);
+
+  // STEP 2: Side Apron Rails & Dowels
+  const group2 = new THREE.Group();
+  rootGroup.add(group2);
+  const sideApronGeo = new THREE.BoxGeometry(1.6, 4.0, lz * 2 - lt);
+
+  const leftApron = new THREE.Mesh(sideApronGeo, oakWoodMat.clone());
+  leftApron.position.set(-lx, lh - 2 + 0.8, 0);
+  leftApron.castShadow = true;
+  leftApron.receiveShadow = true;
+  handleRegister(leftApron, "Left Side Apron Rail", group2);
+
+  const rightApron = new THREE.Mesh(sideApronGeo, oakWoodMat.clone());
+  rightApron.position.set(lx, lh - 2 + 0.8, 0);
+  rightApron.castShadow = true;
+  rightApron.receiveShadow = true;
+  handleRegister(rightApron, "Right Side Apron Rail", group2);
+  stepGroups.set(2, group2);
+
+  // STEP 3: Main Spine Longitudinal Stretchers & Gussets
+  const group3 = new THREE.Group();
+  rootGroup.add(group3);
+  const frontBackGeo = new THREE.BoxGeometry(lx * 2 - lt, 4.0, 1.6);
+
+  const rearStretcher = new THREE.Mesh(frontBackGeo, oakWoodMat.clone());
+  rearStretcher.position.set(0, lh - 2 + 0.8, -lz);
+  rearStretcher.castShadow = true;
+  rearStretcher.receiveShadow = true;
+  handleRegister(rearStretcher, "Rear Longitudinal Stretcher", group3);
+
+  const frontStretcher = new THREE.Mesh(frontBackGeo, oakWoodMat.clone());
+  frontStretcher.position.set(0, lh - 2 + 0.8, lz);
+  frontStretcher.castShadow = true;
+  frontStretcher.receiveShadow = true;
+  handleRegister(frontStretcher, "Front Longitudinal Stretcher", group3);
+
+  const brkGeo = new THREE.BoxGeometry(2.5, 2.5, 0.4);
+  const gussetCoords = [
+    [-lx + 2.5, lh - 2, lz - 1.2, "Front-Left Corner Gusset"],
+    [lx - 2.5, lh - 2, lz - 1.2, "Front-Right Corner Gusset"],
+    [-lx + 2.5, lh - 2, -lz + 1.2, "Rear-Left Corner Gusset"],
+    [lx - 2.5, lh - 2, -lz + 1.2, "Rear-Right Corner Gusset"],
+  ] as const;
+
+  gussetCoords.forEach(([bx, by, bz, name]) => {
+    const b = new THREE.Mesh(brkGeo, darkSteelMat.clone());
+    b.position.set(bx, by, bz);
+    handleRegister(b, name, group3);
+  });
+  stepGroups.set(3, group3);
+
+  // STEP 4: Solid Oak Desktop Slab with Beveled Trim
+  const group4 = new THREE.Group();
+  rootGroup.add(group4);
+  const topWidth = 84, topDepth = 46, topThick = 2.0;
+
+  const desktopGeo = new THREE.BoxGeometry(topWidth, topThick, topDepth);
+  const desktopMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.tan, roughness: 0.3, metalness: 0.04 });
+  const deskTop = new THREE.Mesh(desktopGeo, desktopMat);
+  deskTop.position.set(0, lh + 1.8, 0);
+  deskTop.castShadow = true;
+  deskTop.receiveShadow = true;
+  handleRegister(deskTop, "Solid Oak Desktop Slab (1200x700mm)", group4);
+
+  const trimGeo = new THREE.BoxGeometry(topWidth + 0.2, 0.15, topDepth + 0.2);
+  const trimMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.cream, roughness: 0.2, metalness: 0.02 });
+  const trim = new THREE.Mesh(trimGeo, trimMat);
+  trim.position.set(0, lh + topThick + 0.8, 0);
+  handleRegister(trim, "Chamfered Tabletop Bevel", group4);
+  stepGroups.set(4, group4);
+
+  // STEP 5: Under-Desk Drawer Unit Module
+  const group5 = new THREE.Group();
+  rootGroup.add(group5);
+  const casingGeo = new THREE.BoxGeometry(16, 6, 26);
+  const casing = new THREE.Mesh(casingGeo, oakWoodMat.clone());
+  casing.position.set(lx - 11, lh - 3 + 0.8, 2);
+  casing.castShadow = true;
+  handleRegister(casing, "Suspended Drawer Housing Casing", group5);
+
+  const drawerFaceGeo = new THREE.BoxGeometry(14.8, 4.8, 1);
+  const drawerFace = new THREE.Mesh(drawerFaceGeo, walnutMat.clone());
+  drawerFace.position.set(lx - 11, lh - 3 + 0.8, 15.2);
+  drawerFace.castShadow = true;
+  handleRegister(drawerFace, "Walnut Dovetail Drawer Face", group5);
+
+  const handleGeo = new THREE.BoxGeometry(6, 0.6, 0.8);
+  const handle = new THREE.Mesh(handleGeo, darkSteelMat.clone());
+  handle.position.set(lx - 11, lh - 3 + 0.8, 16.1);
+  handleRegister(handle, "Anodized Black Pull Handle", group5);
+  stepGroups.set(5, group5);
+
+  // STEP 6: Cable Management Raceway & Full-Grain Leather Pad
+  const group6 = new THREE.Group();
+  rootGroup.add(group6);
+  const trayGeo = new THREE.BoxGeometry(42, 3, 5);
+  const tray = new THREE.Mesh(trayGeo, darkSteelMat.clone());
+  tray.position.set(-6, lh - 4 + 0.8, -lz + 4);
+  tray.castShadow = true;
+  handleRegister(tray, "Under-Desk Steel Cable Raceway", group6);
+
+  const padGeo = new THREE.BoxGeometry(44, 0.2, 24);
+  const padMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.ink, roughness: 0.85, metalness: 0.1 });
+  const pad = new THREE.Mesh(padGeo, padMat);
+  pad.position.set(-4, lh + 2.9, 2);
+  pad.receiveShadow = true;
+  handleRegister(pad, "Full-Grain Leather Desk Pad", group6);
+
+  const bookGeo = new THREE.BoxGeometry(9, 0.4, 13);
+  const bookMat = new THREE.MeshStandardMaterial({ color: REAL_TONES.coral, roughness: 0.6, metalness: 0.05 });
+  const book = new THREE.Mesh(bookGeo, bookMat);
+  book.position.set(10, lh + 3.1, 2);
+  book.rotation.y = -0.15;
+  handleRegister(book, "Hardbound Designer Notebook", group6);
+  stepGroups.set(6, group6);
+
+  return { stepGroups, partMeshes, allInteractiveMeshes, rootGroup };
 }
 
 export class ThreeDeskViewer {
@@ -46,6 +435,7 @@ export class ThreeDeskViewer {
 
   // Step state
   private currentStep: number = 1;
+  private currentScene: Scene | null = null;
   private stepGroups: Map<number, THREE.Group> = new Map();
   private partMeshes: Map<string, THREE.Mesh> = new Map();
   private allInteractiveMeshes: THREE.Mesh[] = [];
@@ -111,7 +501,12 @@ export class ThreeDeskViewer {
     this.setupGround();
 
     // 6. Build Beveled Geometry Kernel & Ink Outlines (Pass 2)
-    this.buildDeskModel();
+    if (options.scene) {
+      this.currentScene = options.scene;
+      this.buildSceneModel(options.scene);
+    } else {
+      this.buildDeskModel();
+    }
 
     // 7. Event Listeners for Orbit, Zoom, Pan, Picking
     this.setupInteraction();
@@ -218,19 +613,48 @@ export class ThreeDeskViewer {
     });
   }
 
-  private buildDeskModel(): void {
+  public registerMesh(mesh: THREE.Mesh, name: string, group: THREE.Group): void {
+    mesh.name = name;
+    mesh.userData = { partName: name };
+    this.addInkOutlines(mesh);
+    group.add(mesh);
+    this.allInteractiveMeshes.push(mesh);
+    this.partMeshes.set(name, mesh);
+  }
+
+  public buildSceneModel(scene: Scene): void {
+    this.currentScene = scene;
+    const result = buildSceneModel(scene, (mesh, name, group) => {
+      this.registerMesh(mesh, name, group);
+    });
+    result.stepGroups.forEach((group, stepNum) => {
+      this.stepGroups.set(stepNum, group);
+      this.scene.add(group);
+    });
+  }
+
+  public loadScene(scene: Scene): void {
+    this.stepGroups.forEach((group) => {
+      this.scene.remove(group);
+    });
+    this.stepGroups.clear();
+    this.partMeshes.clear();
+    this.allInteractiveMeshes = [];
+    this.animatedMeshes = [];
+    this.selectedMesh = null;
+    this.hoveredMesh = null;
+    this.buildSceneModel(scene);
+    this.setStep(1, false);
+  }
+
+  public buildDeskModel(): void {
     const oakWoodMat = this.createPbrMaterial(REAL_TONES.tan, 0.38, 0.04);
     const brassMat = this.createPbrMaterial(REAL_TONES.sun, 0.22, 0.88);
     const darkSteelMat = this.createPbrMaterial(REAL_TONES.ink, 0.42, 0.82);
     const walnutMat = this.createPbrMaterial(REAL_TONES.brown, 0.42, 0.05);
 
     const registerMesh = (mesh: THREE.Mesh, name: string, group: THREE.Group) => {
-      mesh.name = name;
-      mesh.userData = { partName: name };
-      this.addInkOutlines(mesh);
-      group.add(mesh);
-      this.allInteractiveMeshes.push(mesh);
-      this.partMeshes.set(name, mesh);
+      this.registerMesh(mesh, name, group);
     };
 
     // STEP 1: 4 Legs + Brass Leveling Glides
@@ -384,7 +808,10 @@ export class ThreeDeskViewer {
   }
 
   public setStep(step: number, animateTransition: boolean = true): void {
-    this.currentStep = Math.max(1, Math.min(step, DESK_BUILD_STEPS.length));
+    const totalSteps = this.currentScene
+      ? this.currentScene.steps.length
+      : DESK_BUILD_STEPS.length;
+    this.currentStep = Math.max(1, Math.min(step, totalSteps));
 
     this.stepGroups.forEach((group, stepNum) => {
       if (stepNum <= this.currentStep) {
@@ -408,7 +835,9 @@ export class ThreeDeskViewer {
       }
     });
 
-    const stepConfig = DESK_BUILD_STEPS[this.currentStep - 1];
+    const stepConfig = this.currentScene
+      ? this.currentScene.steps[this.currentStep - 1]
+      : DESK_BUILD_STEPS[this.currentStep - 1];
     if (stepConfig && stepConfig.cameraPreset) {
       this.targetDistance = stepConfig.cameraPreset.distance;
       this.targetPhi = stepConfig.cameraPreset.phi;

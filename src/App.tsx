@@ -5,6 +5,7 @@ import { Sidebar } from "./Sidebar";
 import { RightPartsWidget } from "./RightPartsWidget";
 import { DESK_BUILD_STEPS } from "./deskData";
 import { ChatSession, ChatMessage } from "./types";
+import { getBuildScene, sceneStepToBuildStep } from "./builds";
 import { Sparkles, Bot, User, Box } from "lucide-react";
 
 export default function App() {
@@ -41,7 +42,10 @@ export default function App() {
   const [highlightedPartName, setHighlightedPartName] = useState<string | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
-  const activeStepData = DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
+  const activeScene = getBuildScene(activeSession?.title || "desk");
+  const activeStepData = activeScene && activeScene.steps[currentStep - 1]
+    ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
+    : (DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0]);
 
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
@@ -64,7 +68,8 @@ export default function App() {
   };
 
   const handleSendMessage = (text: string) => {
-    const isDeskQuery = /desk|table|build|workbench/i.test(text);
+    // Resolve build by name lookup; defaults to desk scene
+    const scene = getBuildScene(text);
 
     const userMsg: ChatMessage = {
       id: "msg-" + Date.now(),
@@ -76,15 +81,14 @@ export default function App() {
     if (!activeSessionId) {
       // Create new session
       const newSessionId = "session-" + Date.now();
-      const newSessionTitle =
-        text.length > 26 ? text.substring(0, 26) + "..." : text;
+      const newSessionTitle = scene.title || "Modern Solid Oak Desk";
 
       const newSession: ChatSession = {
         id: newSessionId,
-        title: isDeskQuery ? "Modern Solid Oak Desk" : newSessionTitle,
+        title: newSessionTitle,
         preview: text,
         timestamp: "Just now",
-        has3DViewer: isDeskQuery,
+        has3DViewer: true,
         currentStep: 1,
         messages: [userMsg],
       };
@@ -96,11 +100,9 @@ export default function App() {
         const botMsg: ChatMessage = {
           id: "bot-" + Date.now(),
           sender: "assistant",
-          text: isDeskQuery
-            ? "Here is your step-by-step 3D assembly manual for the Modern Solid Oak Desk (1200 × 700 × 750 mm). The parts required for your current step are displayed in the Parts Callout widget on the right. You can rotate, zoom, and inspect every component in 3D."
-            : `I received your request: "${text}". I can generate interactive 3D step-by-step instructions. Try asking: "Hey I want to build a desk"!`,
+          text: `Here is your step-by-step 3D assembly manual for the ${newSessionTitle}. The parts required for your current step are displayed in the Parts Callout widget on the right. You can rotate, zoom, and inspect every component in 3D.`,
           timestamp: "Just now",
-          hasBuildDemo: isDeskQuery,
+          hasBuildDemo: true,
         };
 
         setSessions((prev) =>
@@ -125,11 +127,9 @@ export default function App() {
         const botMsg: ChatMessage = {
           id: "bot-" + Date.now(),
           sender: "assistant",
-          text: isDeskQuery
-            ? "Updated 3D instruction manual for the Modern Solid Oak Desk. You can navigate the steps and inspect parts on the right."
-            : `Understood! Let me know if you want to inspect a specific step, adjust dimensions, or see alternate materials.`,
+          text: `Updated 3D instruction manual for the ${scene.title || "Modern Solid Oak Desk"}. You can navigate the steps and inspect parts on the right.`,
           timestamp: "Just now",
-          hasBuildDemo: isDeskQuery,
+          hasBuildDemo: true,
         };
 
         setSessions((prev) =>
@@ -137,7 +137,7 @@ export default function App() {
             s.id === activeSessionId
               ? {
                   ...s,
-                  has3DViewer: s.has3DViewer || isDeskQuery,
+                  has3DViewer: true,
                   messages: [...s.messages, botMsg],
                 }
               : s
@@ -148,7 +148,7 @@ export default function App() {
   };
 
   const handleTriggerDemo = () => {
-    handleSendMessage("Hey I want to build a desk");
+    handleSendMessage("desk");
   };
 
   const hasMessages = activeSession && activeSession.messages.length > 0;
@@ -248,6 +248,7 @@ export default function App() {
                     {msg.hasBuildDemo && (
                       <div className="w-full mt-2">
                         <DeskBuilderViewer
+                          scene={activeScene}
                           currentStep={currentStep}
                           onStepChange={(s) => setCurrentStep(s)}
                           showEmbeddedPartsCard={!rightWidgetOpen}
@@ -280,7 +281,7 @@ export default function App() {
         <RightPartsWidget
           step={activeStepData}
           currentStep={currentStep}
-          totalSteps={DESK_BUILD_STEPS.length}
+          totalSteps={activeScene ? activeScene.steps.length : DESK_BUILD_STEPS.length}
           isOpen={rightWidgetOpen}
           onToggle={() => setRightWidgetOpen((prev) => !prev)}
           onStepSelect={(step) => setCurrentStep(step)}

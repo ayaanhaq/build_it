@@ -1,4 +1,4 @@
-import { BuildStep } from "./types";
+import type { BuildStep } from "./types";
 
 export const DESK_BUILD_STEPS: BuildStep[] = [
   {

@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { ThreeDeskViewer } from "./three-scene";
 import { DESK_BUILD_STEPS } from "./deskData";
 import { LegoPartsCard } from "./LegoPartsCard";
+import type { Scene } from "./types";
+import { DESK_SCENE } from "./fixtures/desk.scene";
+import { sceneStepToBuildStep } from "./builds";
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,6 +13,7 @@ import {
 } from "lucide-react";
 
 interface DeskBuilderViewerProps {
+  scene?: Scene;
   currentStep?: number;
   onStepChange?: (step: number) => void;
   showEmbeddedPartsCard?: boolean;
@@ -18,6 +22,7 @@ interface DeskBuilderViewerProps {
 }
 
 export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
+  scene,
   currentStep: externalStep,
   onStepChange: externalOnStepChange,
   showEmbeddedPartsCard = false,
@@ -27,10 +32,13 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<ThreeDeskViewer | null>(null);
 
+  const activeScene = scene || DESK_SCENE;
   const [internalStep, setInternalStep] = useState<number>(1);
   const currentStep = externalStep !== undefined ? externalStep : internalStep;
-  const totalSteps = DESK_BUILD_STEPS.length;
-  const activeStepData = DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
+  const totalSteps = activeScene ? activeScene.steps.length : DESK_BUILD_STEPS.length;
+  const activeStepData = activeScene && activeScene.steps[currentStep - 1]
+    ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
+    : (DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0]);
 
   // Hover callout state (Pass 8 Analytical 2D Leader Callouts)
   const [hoverCallout, setHoverCallout] = useState<{
@@ -45,6 +53,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
     const viewer = new ThreeDeskViewer({
       container: containerRef.current,
       initialStep: currentStep,
+      scene: activeScene,
       onPartHover: (partName, x, y) => {
         if (partName) {
           const rect = containerRef.current?.getBoundingClientRect();
@@ -70,6 +79,13 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
       viewerRef.current = null;
     };
   }, []);
+
+  // Sync scene changes
+  useEffect(() => {
+    if (viewerRef.current && scene) {
+      viewerRef.current.loadScene(scene);
+    }
+  }, [scene]);
 
   // Sync external step changes
   useEffect(() => {
