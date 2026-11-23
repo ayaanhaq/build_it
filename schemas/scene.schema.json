@@ -1,0 +1,241 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scene",
+  "description": "Validated 3D scene specification for procedural step-by-step physical assembly builds.",
+  "type": "object",
+  "required": ["schemaVersion", "steps"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version number, set to 1."
+    },
+    "name": {
+      "type": "string",
+      "description": "Unique identifier / build key for the scene (e.g. 'desk')."
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title of the physical build."
+    },
+    "description": {
+      "type": "string",
+      "description": "High-level summary of the build."
+    },
+    "steps": {
+      "type": "array",
+      "description": "Ordered sequence of assembly steps.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/SceneStep"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Vector3D": {
+      "type": "object",
+      "description": "3D coordinate in millimeters (for position) or degrees (for rotation).",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "ScenePrimitiveType": {
+      "type": "string",
+      "enum": ["box", "cylinder", "lathe", "bevel", "spring"],
+      "description": "Supported procedural 3D geometric primitive."
+    },
+    "RealToneColor": {
+      "type": "string",
+      "enum": [
+        "ink",
+        "white",
+        "grey",
+        "butter",
+        "sun",
+        "orange",
+        "peach",
+        "coral",
+        "red",
+        "pink",
+        "lilac",
+        "violet",
+        "sky",
+        "blue",
+        "mint",
+        "leaf",
+        "brown",
+        "tan",
+        "cream"
+      ],
+      "description": "Color name from the REAL_TONES physical material palette."
+    },
+    "BoxDimensions": {
+      "type": "object",
+      "required": ["width", "height", "depth"],
+      "properties": {
+        "width": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "height": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "depth": { "type": "number", "minimum": 0.1, "maximum": 5000.0 }
+      },
+      "additionalProperties": false
+    },
+    "CylinderDimensions": {
+      "type": "object",
+      "required": ["height"],
+      "properties": {
+        "height": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "radius": { "type": "number", "minimum": 0.1, "maximum": 2500.0 },
+        "radiusTop": { "type": "number", "minimum": 0.1, "maximum": 2500.0 },
+        "radiusBottom": { "type": "number", "minimum": 0.1, "maximum": 2500.0 },
+        "radialSegments": { "type": "integer", "minimum": 3, "maximum": 128 }
+      },
+      "additionalProperties": false
+    },
+    "LatheDimensions": {
+      "type": "object",
+      "required": ["radius", "height"],
+      "properties": {
+        "radius": { "type": "number", "minimum": 0.1, "maximum": 2500.0 },
+        "height": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "segments": { "type": "integer", "minimum": 3, "maximum": 128 }
+      },
+      "additionalProperties": false
+    },
+    "BevelDimensions": {
+      "type": "object",
+      "required": ["width", "height", "depth"],
+      "properties": {
+        "width": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "height": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "depth": { "type": "number", "minimum": 0.1, "maximum": 5000.0 },
+        "bevelSize": { "type": "number", "minimum": 0.0, "maximum": 100.0 },
+        "bevelThickness": { "type": "number", "minimum": 0.0, "maximum": 100.0 }
+      },
+      "additionalProperties": false
+    },
+    "SpringDimensions": {
+      "type": "object",
+      "required": ["radius", "height"],
+      "properties": {
+        "radius": { "type": "number", "minimum": 0.5, "maximum": 1000.0 },
+        "height": { "type": "number", "minimum": 1.0, "maximum": 3000.0 },
+        "coils": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "wireRadius": { "type": "number", "minimum": 0.1, "maximum": 100.0 }
+      },
+      "additionalProperties": false
+    },
+    "ScenePart": {
+      "type": "object",
+      "required": [
+        "id",
+        "primitive",
+        "dimensions",
+        "position",
+        "rotation",
+        "color",
+        "material",
+        "step",
+        "qty"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for this part within the scene."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable label for the parts list and UI callouts."
+        },
+        "primitive": {
+          "$ref": "#/definitions/ScenePrimitiveType"
+        },
+        "dimensions": {
+          "type": "object",
+          "description": "Primitive dimensions in millimeters, adhering to primitive-specific bounds."
+        },
+        "position": {
+          "$ref": "#/definitions/Vector3D"
+        },
+        "rotation": {
+          "$ref": "#/definitions/Vector3D"
+        },
+        "color": {
+          "$ref": "#/definitions/RealToneColor"
+        },
+        "material": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Physical material identifier (e.g. 'oak', 'walnut', 'steel', 'brass')."
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed step number to which this part belongs."
+        },
+        "qty": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "minLength": 1 }
+          ],
+          "description": "Quantity for parts list display, kept separate from 3D geometry."
+        }
+      },
+      "additionalProperties": false
+    },
+    "CameraPreset": {
+      "type": "object",
+      "required": ["distance", "phi", "theta"],
+      "properties": {
+        "distance": { "type": "number", "minimum": 1.0 },
+        "phi": { "type": "number" },
+        "theta": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "SceneStep": {
+      "type": "object",
+      "required": ["stepNumber", "title", "parts"],
+      "properties": {
+        "stepNumber": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed sequential step number."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Step title."
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Step subtitle / grouping label."
+        },
+        "description": {
+          "type": "string",
+          "description": "Step instruction prose."
+        },
+        "proTip": {
+          "type": "string",
+          "description": "Optional assembly guidance tip."
+        },
+        "cameraPreset": {
+          "$ref": "#/definitions/CameraPreset"
+        },
+        "parts": {
+          "type": "array",
+          "description": "Parts introduced or assembled in this step.",
+          "items": {
+            "$ref": "#/definitions/ScenePart"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
