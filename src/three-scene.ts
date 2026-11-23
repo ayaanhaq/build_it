@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { DESK_BUILD_STEPS } from "./deskData.ts";
+import { PRIMITIVE_BOUNDS } from "./sceneValidator.ts";
 import type {
   Scene,
   SceneStep,
@@ -81,10 +82,14 @@ export function buildBevelGeometry(dim: BevelDimensions): THREE.BufferGeometry {
   const w = dim.width;
   const h = dim.height;
   const d = dim.depth;
-  const bevelSize = dim.bevelSize ?? 0;
-  const bevelThickness = dim.bevelThickness ?? bevelSize;
+  const rawBevelSize = dim.bevelSize ?? 0;
+  const rawBevelThickness = dim.bevelThickness ?? rawBevelSize;
 
-  if (bevelSize > 0 || bevelThickness > 0) {
+  const maxBevel = Math.min(w, d) * 0.45;
+  const bevelSize = Math.max(0, Math.min(rawBevelSize, maxBevel));
+  const bevelThickness = Math.max(0, Math.min(rawBevelThickness, h * 0.45));
+
+  if (bevelSize > 0 && bevelThickness > 0) {
     const shape = new THREE.Shape();
     const halfW = w / 2 - bevelSize;
     const halfD = d / 2 - bevelSize;
@@ -151,6 +156,11 @@ export const PRIMITIVE_BUILDERS: Record<ScenePrimitiveType, (dimensions: any) =>
   spring: (d) => buildSpringGeometry(d as SpringDimensions),
 };
 
+function clampToTableBound(value: number, bound: { min: number; max: number }): number {
+  if (!Number.isFinite(value)) return bound.min;
+  return Math.max(bound.min, Math.min(bound.max, value));
+}
+
 /**
  * Resolves standard physical material parameters from descriptive material names.
  */
@@ -180,6 +190,221 @@ export function getMaterialParams(materialName: string = ""): { roughness: numbe
   return { roughness: 0.35, metalness: 0.05 };
 }
 
+/**
+ * Dedicated builder for box primitives.
+ * Enforces dimensions against canonical PRIMITIVE_BOUNDS.
+ * Returns a THREE.Mesh that passes registerMesh.
+ */
+export function buildBox(
+  input: BoxDimensions | ScenePart,
+  customMaterial?: THREE.Material
+): THREE.Mesh {
+  const part = "primitive" in input ? (input as ScenePart) : undefined;
+  const dim = part ? (part.dimensions as BoxDimensions) : (input as BoxDimensions);
+  const bounds = PRIMITIVE_BOUNDS.box;
+
+  const width = clampToTableBound(dim.width, bounds.width);
+  const height = clampToTableBound(dim.height, bounds.height);
+  const depth = clampToTableBound(dim.depth, bounds.depth);
+
+  const geometry = buildBoxGeometry({ width, height, depth });
+  let material = customMaterial;
+  if (!material) {
+    const hex = part ? (REAL_TONES[part.color] ?? REAL_TONES.tan) : REAL_TONES.tan;
+    const { roughness, metalness } = getMaterialParams(part ? part.material : "oak");
+    material = new THREE.MeshStandardMaterial({ color: hex, roughness, metalness });
+  }
+
+  const mesh = new THREE.Mesh(geometry, material);
+  if (part) {
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+  }
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Dedicated builder for cylinder primitives.
+ * Enforces dimensions against canonical PRIMITIVE_BOUNDS.
+ * Returns a THREE.Mesh that passes registerMesh.
+ */
+export function buildCylinder(
+  input: CylinderDimensions | ScenePart,
+  customMaterial?: THREE.Material
+): THREE.Mesh {
+  const part = "primitive" in input ? (input as ScenePart) : undefined;
+  const dim = part ? (part.dimensions as CylinderDimensions) : (input as CylinderDimensions);
+  const bounds = PRIMITIVE_BOUNDS.cylinder;
+
+  const height = clampToTableBound(dim.height, bounds.height);
+  const radius = clampToTableBound(dim.radius ?? dim.radiusTop ?? 1, bounds.radius);
+  const radiusTop = dim.radiusTop !== undefined ? clampToTableBound(dim.radiusTop, bounds.radiusTop) : radius;
+  const radiusBottom = dim.radiusBottom !== undefined ? clampToTableBound(dim.radiusBottom, bounds.radiusBottom) : radius;
+  const radialSegments = Math.round(clampToTableBound(dim.radialSegments ?? 24, bounds.radialSegments));
+
+  const geometry = buildCylinderGeometry({ height, radius, radiusTop, radiusBottom, radialSegments });
+  let material = customMaterial;
+  if (!material) {
+    const hex = part ? (REAL_TONES[part.color] ?? REAL_TONES.sun) : REAL_TONES.sun;
+    const { roughness, metalness } = getMaterialParams(part ? part.material : "brass");
+    material = new THREE.MeshStandardMaterial({ color: hex, roughness, metalness });
+  }
+
+  const mesh = new THREE.Mesh(geometry, material);
+  if (part) {
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+  }
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Dedicated builder for lathe primitives (turned legs, spindles, rotational symmetry).
+ * Enforces dimensions against canonical PRIMITIVE_BOUNDS.
+ * Returns a THREE.Mesh that passes registerMesh.
+ */
+export function buildLathe(
+  input: LatheDimensions | ScenePart,
+  customMaterial?: THREE.Material
+): THREE.Mesh {
+  const part = "primitive" in input ? (input as ScenePart) : undefined;
+  const dim = part ? (part.dimensions as LatheDimensions) : (input as LatheDimensions);
+  const bounds = PRIMITIVE_BOUNDS.lathe;
+
+  const radius = clampToTableBound(dim.radius, bounds.radius);
+  const height = clampToTableBound(dim.height, bounds.height);
+  const segments = Math.round(clampToTableBound(dim.segments ?? 24, bounds.segments));
+
+  const geometry = buildLatheGeometry({ radius, height, segments });
+  let material = customMaterial;
+  if (!material) {
+    const hex = part ? (REAL_TONES[part.color] ?? REAL_TONES.tan) : REAL_TONES.tan;
+    const { roughness, metalness } = getMaterialParams(part ? part.material : "oak");
+    material = new THREE.MeshStandardMaterial({ color: hex, roughness, metalness });
+  }
+
+  const mesh = new THREE.Mesh(geometry, material);
+  if (part) {
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+  }
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Dedicated builder for bevel primitives (chamfered slabs, beveled edges).
+ * Enforces dimensions against canonical PRIMITIVE_BOUNDS.
+ * Returns a THREE.Mesh that passes registerMesh.
+ */
+export function buildBevel(
+  input: BevelDimensions | ScenePart,
+  customMaterial?: THREE.Material
+): THREE.Mesh {
+  const part = "primitive" in input ? (input as ScenePart) : undefined;
+  const dim = part ? (part.dimensions as BevelDimensions) : (input as BevelDimensions);
+  const bounds = PRIMITIVE_BOUNDS.bevel;
+
+  const width = clampToTableBound(dim.width, bounds.width);
+  const height = clampToTableBound(dim.height, bounds.height);
+  const depth = clampToTableBound(dim.depth, bounds.depth);
+  const bevelSize = clampToTableBound(dim.bevelSize ?? 0, bounds.bevelSize);
+  const bevelThickness = clampToTableBound(dim.bevelThickness ?? bevelSize, bounds.bevelThickness);
+
+  const geometry = buildBevelGeometry({ width, height, depth, bevelSize, bevelThickness });
+  let material = customMaterial;
+  if (!material) {
+    const hex = part ? (REAL_TONES[part.color] ?? REAL_TONES.tan) : REAL_TONES.tan;
+    const { roughness, metalness } = getMaterialParams(part ? part.material : "oak");
+    material = new THREE.MeshStandardMaterial({ color: hex, roughness, metalness });
+  }
+
+  const mesh = new THREE.Mesh(geometry, material);
+  if (part) {
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+  }
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Dedicated builder for spring primitives (coils, helical wire components).
+ * Enforces dimensions against canonical PRIMITIVE_BOUNDS.
+ * Returns a THREE.Mesh that passes registerMesh.
+ */
+export function buildSpring(
+  input: SpringDimensions | ScenePart,
+  customMaterial?: THREE.Material
+): THREE.Mesh {
+  const part = "primitive" in input ? (input as ScenePart) : undefined;
+  const dim = part ? (part.dimensions as SpringDimensions) : (input as SpringDimensions);
+  const bounds = PRIMITIVE_BOUNDS.spring;
+
+  const radius = clampToTableBound(dim.radius, bounds.radius);
+  const height = clampToTableBound(dim.height, bounds.height);
+  const coils = Math.round(clampToTableBound(dim.coils ?? 5, bounds.coils));
+  const defaultWireR = Math.min(radius * 0.1, 1.0);
+  const wireRadius = clampToTableBound(dim.wireRadius ?? defaultWireR, bounds.wireRadius);
+
+  const geometry = buildSpringGeometry({ radius, height, coils, wireRadius });
+  let material = customMaterial;
+  if (!material) {
+    const hex = part ? (REAL_TONES[part.color] ?? REAL_TONES.sun) : REAL_TONES.sun;
+    const { roughness, metalness } = getMaterialParams(part ? part.material : "steel");
+    material = new THREE.MeshStandardMaterial({ color: hex, roughness, metalness });
+  }
+
+  const mesh = new THREE.Mesh(geometry, material);
+  if (part) {
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+  }
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
+ * Dispatch table mapping primitive types to dedicated mesh builder functions.
+ */
+export const PRIMITIVE_PART_BUILDERS: Record<
+  ScenePrimitiveType,
+  (input: any, material?: THREE.Material) => THREE.Mesh
+> = {
+  box: buildBox,
+  cylinder: buildCylinder,
+  lathe: buildLathe,
+  bevel: buildBevel,
+  spring: buildSpring,
+};
+
 export interface SceneModelResult {
   stepGroups: Map<number, THREE.Group>;
   partMeshes: Map<string, THREE.Mesh>;
@@ -208,31 +433,13 @@ export function buildStepMeshes(
   group.name = `Step-${step.stepNumber}-Group`;
 
   for (const part of step.parts) {
-    const builder = PRIMITIVE_BUILDERS[part.primitive];
+    const builder = PRIMITIVE_PART_BUILDERS[part.primitive];
     if (!builder) {
       console.warn(`Unknown primitive builder for: ${part.primitive}`);
       continue;
     }
 
-    const geometry = builder(part.dimensions);
-    const hexColor = REAL_TONES[part.color] ?? REAL_TONES.tan;
-    const { roughness, metalness } = getMaterialParams(part.material);
-    const material = new THREE.MeshStandardMaterial({
-      color: hexColor,
-      roughness,
-      metalness,
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(part.position.x, part.position.y, part.position.z);
-    mesh.rotation.set(
-      THREE.MathUtils.degToRad(part.rotation.x),
-      THREE.MathUtils.degToRad(part.rotation.y),
-      THREE.MathUtils.degToRad(part.rotation.z)
-    );
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
+    const mesh = builder(part);
     registerMesh(mesh, part.name || part.id, group);
   }
 

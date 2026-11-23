@@ -1,6 +1,9 @@
-import type { Scene, SceneStep, BuildStep, DeskPart, ScenePart } from "./types";
-import { DESK_SCENE } from "./fixtures/desk.scene";
-import { REAL_TONES } from "./three-scene";
+import type { Scene, SceneStep, BuildStep, DeskPart, ScenePart } from "./types.ts";
+import { DESK_SCENE } from "./fixtures/desk.scene.ts";
+import { LATHE_SCENE } from "./fixtures/lathe.scene.ts";
+import { BEVEL_SCENE } from "./fixtures/bevel.scene.ts";
+import { SPRING_SCENE } from "./fixtures/spring.scene.ts";
+import { REAL_TONES } from "./three-scene.ts";
 
 /**
  * Registry of validated 3D build scenes.
@@ -11,6 +14,9 @@ export const BUILDS: Record<string, Scene> = {
   "modern solid oak desk": DESK_SCENE,
   "solid oak desk": DESK_SCENE,
   "oak desk": DESK_SCENE,
+  lathe: LATHE_SCENE,
+  bevel: BEVEL_SCENE,
+  spring: SPRING_SCENE,
 };
 
 /**
