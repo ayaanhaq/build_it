@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { DESK_BUILD_STEPS } from "./deskData.ts";
 import type {
   Scene,
+  SceneStep,
   ScenePart,
   ScenePrimitiveType,
   BoxDimensions,
@@ -179,73 +180,141 @@ export function getMaterialParams(materialName: string = ""): { roughness: numbe
   return { roughness: 0.35, metalness: 0.05 };
 }
 
-/**
- * Builds Three.js meshes from a validated Scene contract.
- * Each primitive maps to a builder function.
- * Every mesh is routed through registerMesh.
- */
-export function buildSceneModel(
-  scene: Scene,
-  registerMesh?: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
-): {
+export interface SceneModelResult {
   stepGroups: Map<number, THREE.Group>;
   partMeshes: Map<string, THREE.Mesh>;
   allInteractiveMeshes: THREE.Mesh[];
   rootGroup: THREE.Group;
-} {
-  const stepGroups = new Map<number, THREE.Group>();
-  const partMeshes = new Map<string, THREE.Mesh>();
-  const allInteractiveMeshes: THREE.Mesh[] = [];
-  const rootGroup = new THREE.Group();
+}
 
+export function createEmptySceneModel(): SceneModelResult {
+  return {
+    stepGroups: new Map<number, THREE.Group>(),
+    partMeshes: new Map<string, THREE.Mesh>(),
+    allInteractiveMeshes: [],
+    rootGroup: new THREE.Group(),
+  };
+}
+
+/**
+ * Builds meshes for a single SceneStep into a THREE.Group.
+ * Routes every mesh through registerMesh.
+ */
+export function buildStepMeshes(
+  step: SceneStep,
+  registerMesh: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `Step-${step.stepNumber}-Group`;
+
+  for (const part of step.parts) {
+    const builder = PRIMITIVE_BUILDERS[part.primitive];
+    if (!builder) {
+      console.warn(`Unknown primitive builder for: ${part.primitive}`);
+      continue;
+    }
+
+    const geometry = builder(part.dimensions);
+    const hexColor = REAL_TONES[part.color] ?? REAL_TONES.tan;
+    const { roughness, metalness } = getMaterialParams(part.material);
+    const material = new THREE.MeshStandardMaterial({
+      color: hexColor,
+      roughness,
+      metalness,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(part.position.x, part.position.y, part.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation.x),
+      THREE.MathUtils.degToRad(part.rotation.y),
+      THREE.MathUtils.degToRad(part.rotation.z)
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    registerMesh(mesh, part.name || part.id, group);
+  }
+
+  return group;
+}
+
+/**
+ * Appends a single SceneStep incrementally into a SceneModelResult.
+ * If model is provided, registers the group and meshes into the model.
+ * Routes every mesh through registerMesh.
+ */
+export function appendStep(
+  step: SceneStep,
+  model?: SceneModelResult,
+  registerMesh?: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
+): THREE.Group {
   const handleRegister = registerMesh || ((mesh: THREE.Mesh, name: string, group: THREE.Group) => {
     mesh.name = name;
     mesh.userData = { partName: name };
     group.add(mesh);
-    allInteractiveMeshes.push(mesh);
-    partMeshes.set(name, mesh);
+    if (model) {
+      model.allInteractiveMeshes.push(mesh);
+      model.partMeshes.set(name, mesh);
+    }
   });
 
-  for (const step of scene.steps) {
-    let group = stepGroups.get(step.stepNumber);
-    if (!group) {
-      group = new THREE.Group();
-      group.name = `Step-${step.stepNumber}-Group`;
-      stepGroups.set(step.stepNumber, group);
-      rootGroup.add(group);
+  const group = buildStepMeshes(step, handleRegister);
+
+  if (model) {
+    if (model.stepGroups.has(step.stepNumber)) {
+      removeStep(step.stepNumber, model);
     }
+    model.stepGroups.set(step.stepNumber, group);
+    model.rootGroup.add(group);
+  }
 
-    for (const part of step.parts) {
-      const builder = PRIMITIVE_BUILDERS[part.primitive];
-      if (!builder) {
-        console.warn(`Unknown primitive builder for: ${part.primitive}`);
-        continue;
-      }
+  return group;
+}
 
-      const geometry = builder(part.dimensions);
-      const hexColor = REAL_TONES[part.color] ?? REAL_TONES.tan;
-      const { roughness, metalness } = getMaterialParams(part.material);
-      const material = new THREE.MeshStandardMaterial({
-        color: hexColor,
-        roughness,
-        metalness,
-      });
+/**
+ * Removes a step from a SceneModelResult for undo support.
+ */
+export function removeStep(
+  stepNumber: number,
+  model: SceneModelResult
+): boolean {
+  const group = model.stepGroups.get(stepNumber);
+  if (!group) return false;
 
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(part.position.x, part.position.y, part.position.z);
-      mesh.rotation.set(
-        THREE.MathUtils.degToRad(part.rotation.x),
-        THREE.MathUtils.degToRad(part.rotation.y),
-        THREE.MathUtils.degToRad(part.rotation.z)
-      );
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+  model.rootGroup.remove(group);
+  model.stepGroups.delete(stepNumber);
 
-      handleRegister(mesh, part.name || part.id, group);
+  const meshesToRemove = new Set<THREE.Mesh>();
+  group.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh) {
+      meshesToRemove.add(obj as THREE.Mesh);
+    }
+  });
+
+  model.allInteractiveMeshes = model.allInteractiveMeshes.filter((m) => !meshesToRemove.has(m));
+  for (const [name, mesh] of model.partMeshes.entries()) {
+    if (meshesToRemove.has(mesh)) {
+      model.partMeshes.delete(name);
     }
   }
 
-  return { stepGroups, partMeshes, allInteractiveMeshes, rootGroup };
+  return true;
+}
+
+/**
+ * Builds Three.js meshes from a validated Scene contract.
+ * Implemented on top of appendStep.
+ */
+export function buildSceneModel(
+  scene: Scene,
+  registerMesh?: (mesh: THREE.Mesh, name: string, group: THREE.Group) => void
+): SceneModelResult {
+  const model = createEmptySceneModel();
+  for (const step of scene.steps) {
+    appendStep(step, model, registerMesh);
+  }
+  return model;
 }
 
 /**
@@ -622,18 +691,98 @@ export class ThreeDeskViewer {
     this.partMeshes.set(name, mesh);
   }
 
-  public buildSceneModel(scene: Scene): void {
-    this.currentScene = scene;
-    const result = buildSceneModel(scene, (mesh, name, group) => {
-      this.registerMesh(mesh, name, group);
+  /**
+   * Appends a single SceneStep incrementally into the Three.js scene.
+   * Builds only that step's meshes and routes every mesh through registerMesh.
+   */
+  public appendStep(step: SceneStep, animateTransition: boolean = true): THREE.Group {
+    // If step already exists, replace it cleanly
+    if (this.stepGroups.has(step.stepNumber)) {
+      this.removeStep(step.stepNumber);
+    }
+
+    // Track step within currentScene
+    if (this.currentScene) {
+      const idx = this.currentScene.steps.findIndex((s) => s.stepNumber === step.stepNumber);
+      if (idx >= 0) {
+        this.currentScene.steps[idx] = step;
+      } else {
+        this.currentScene.steps.push(step);
+      }
+    } else {
+      this.currentScene = {
+        schemaVersion: 1,
+        steps: [step],
+      };
+    }
+
+    const group = buildStepMeshes(step, (mesh, name, grp) => {
+      this.registerMesh(mesh, name, grp);
     });
-    result.stepGroups.forEach((group, stepNum) => {
-      this.stepGroups.set(stepNum, group);
-      this.scene.add(group);
-    });
+
+    this.stepGroups.set(step.stepNumber, group);
+    this.scene.add(group);
+
+    if (step.cameraPreset) {
+      this.targetDistance = step.cameraPreset.distance;
+      this.targetPhi = step.cameraPreset.phi;
+      this.targetTheta = step.cameraPreset.theta;
+    }
+
+    this.setStep(step.stepNumber, animateTransition);
+    return group;
   }
 
-  public loadScene(scene: Scene): void {
+  /**
+   * Removes a step from the Three.js scene for undo support.
+   */
+  public removeStep(stepNumber: number): boolean {
+    const group = this.stepGroups.get(stepNumber);
+    if (!group) return false;
+
+    this.scene.remove(group);
+    this.stepGroups.delete(stepNumber);
+
+    const meshesToRemove = new Set<THREE.Mesh>();
+    group.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        meshesToRemove.add(obj as THREE.Mesh);
+      }
+    });
+
+    this.allInteractiveMeshes = this.allInteractiveMeshes.filter((m) => !meshesToRemove.has(m));
+    for (const [name, mesh] of this.partMeshes.entries()) {
+      if (meshesToRemove.has(mesh)) {
+        this.partMeshes.delete(name);
+      }
+    }
+
+    if (this.selectedMesh && meshesToRemove.has(this.selectedMesh)) {
+      this.selectedMesh = null;
+    }
+    if (this.hoveredMesh && meshesToRemove.has(this.hoveredMesh)) {
+      this.hoveredMesh = null;
+    }
+
+    if (this.currentScene) {
+      this.currentScene.steps = this.currentScene.steps.filter((s) => s.stepNumber !== stepNumber);
+    }
+
+    if (this.currentStep === stepNumber) {
+      const remainingSteps = Array.from(this.stepGroups.keys()).sort((a, b) => a - b);
+      const newStep = remainingSteps.length > 0 ? remainingSteps[remainingSteps.length - 1] : 1;
+      this.setStep(newStep, false);
+    }
+
+    return true;
+  }
+
+  /**
+   * Builds the complete scene model.
+   * Implemented on top of appendStep.
+   */
+  public buildSceneModel(scene: Scene): void {
+    // Clear any previous step groups from Three.js scene
     this.stepGroups.forEach((group) => {
       this.scene.remove(group);
     });
@@ -643,6 +792,16 @@ export class ThreeDeskViewer {
     this.animatedMeshes = [];
     this.selectedMesh = null;
     this.hoveredMesh = null;
+
+    this.currentScene = { ...scene, steps: [] };
+    for (const step of scene.steps) {
+      this.appendStep(step, false);
+    }
+    this.currentScene = scene;
+    this.setStep(this.currentStep, false);
+  }
+
+  public loadScene(scene: Scene): void {
     this.buildSceneModel(scene);
     this.setStep(1, false);
   }

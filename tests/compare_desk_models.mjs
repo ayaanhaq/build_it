@@ -4,6 +4,9 @@ import { validateScene } from '../src/sceneValidator.ts';
 import {
   buildSceneModel,
   buildHandBuiltDeskModel,
+  appendStep,
+  removeStep,
+  createEmptySceneModel,
   PRIMITIVE_BUILDERS,
 } from '../src/three-scene.ts';
 
@@ -11,7 +14,7 @@ try {
   // 1. Scene validation
   const validationErrors = validateScene(DESK_SCENE);
 
-  // 2. Build both models
+  // 2. Build hand-built model and full sceneModel (implemented on top of appendStep)
   const handBuilt = buildHandBuiltDeskModel();
   const sceneModel = buildSceneModel(DESK_SCENE);
 
@@ -52,7 +55,70 @@ try {
     }
   }
 
-  // 5. Primitive builder completeness test
+  // 5. Incremental appending test (steps 1 to N one at a time vs buildSceneModel)
+  const incrementalModel = createEmptySceneModel();
+  for (const step of DESK_SCENE.steps) {
+    appendStep(step, incrementalModel);
+  }
+  const incBox = new THREE.Box3().setFromObject(incrementalModel.rootGroup);
+  const incDelta = Math.max(
+    Math.abs(sceneBox.min.x - incBox.min.x),
+    Math.abs(sceneBox.min.y - incBox.min.y),
+    Math.abs(sceneBox.min.z - incBox.min.z),
+    Math.abs(sceneBox.max.x - incBox.max.x),
+    Math.abs(sceneBox.max.y - incBox.max.y),
+    Math.abs(sceneBox.max.z - incBox.max.z)
+  );
+
+  const incrementalMatchesFull =
+    incrementalModel.allInteractiveMeshes.length === sceneModel.allInteractiveMeshes.length &&
+    incrementalModel.stepGroups.size === sceneModel.stepGroups.size &&
+    incDelta < 1e-4;
+
+  // 6. Partial build test (steps 1 to 2 of a 5-step scene)
+  const fiveStepScene = {
+    schemaVersion: 1,
+    steps: [1, 2, 3, 4, 5].map((num) => ({
+      stepNumber: num,
+      title: `Step ${num}`,
+      parts: [
+        {
+          id: `step-${num}-box`,
+          name: `Box Part ${num}`,
+          primitive: 'box',
+          dimensions: { width: 10 * num, height: 10, depth: 10 },
+          position: { x: num * 20, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: num,
+          qty: 1,
+        },
+      ],
+    })),
+  };
+
+  const partialFiveStepModel = createEmptySceneModel();
+  appendStep(fiveStepScene.steps[0], partialFiveStepModel);
+  appendStep(fiveStepScene.steps[1], partialFiveStepModel);
+  const partialFiveStepBox = new THREE.Box3().setFromObject(partialFiveStepModel.rootGroup);
+
+  const partialFiveStepValid =
+    partialFiveStepModel.stepGroups.size === 2 &&
+    partialFiveStepModel.allInteractiveMeshes.length === 2 &&
+    Number.isFinite(partialFiveStepBox.min.x) &&
+    Number.isFinite(partialFiveStepBox.max.x);
+
+  // 7. Undo / removeStep test on partial build
+  const removedStep2 = removeStep(2, partialFiveStepModel);
+  const undoValid =
+    removedStep2 &&
+    partialFiveStepModel.stepGroups.size === 1 &&
+    partialFiveStepModel.allInteractiveMeshes.length === 1 &&
+    partialFiveStepModel.partMeshes.has('Box Part 1') &&
+    !partialFiveStepModel.partMeshes.has('Box Part 2');
+
+  // 8. Primitive builder completeness test
   const primitiveSmokeTest = {
     box: PRIMITIVE_BUILDERS.box({ width: 10, height: 10, depth: 10 }) instanceof THREE.BufferGeometry,
     cylinder: PRIMITIVE_BUILDERS.cylinder({ height: 20, radius: 5 }) instanceof THREE.BufferGeometry,
@@ -78,13 +144,23 @@ try {
     },
     maxDelta,
     partMismatches,
+    incrementalMatchesFull,
+    incrementalPartCount: incrementalModel.allInteractiveMeshes.length,
+    incrementalStepCount: incrementalModel.stepGroups.size,
+    incrementalDelta: incDelta,
+    partialFiveStepValid,
+    partialFiveStepStepCount: 2,
+    undoValid,
     primitiveSmokeTest,
     passed:
       validationErrors.length === 0 &&
       handBuilt.allInteractiveMeshes.length === 24 &&
       sceneModel.allInteractiveMeshes.length === 24 &&
       maxDelta < 1e-4 &&
-      partMismatches.length === 0,
+      partMismatches.length === 0 &&
+      incrementalMatchesFull &&
+      partialFiveStepValid &&
+      undoValid,
   };
 
   process.stdout.write(JSON.stringify(result, null, 2));
