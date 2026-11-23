@@ -2,6 +2,7 @@ import hashlib
 import io
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from datasheet_ingest import (
     DatasheetIngestor,
@@ -32,7 +33,10 @@ class DatasheetIngestTests(unittest.TestCase):
             compute_file_sha256("/nonexistent/datasheet.pdf")
 
     def test_ingest_pdf_from_bytes_and_file(self):
-        import pypdf
+        try:
+            import pypdf
+        except ImportError:
+            self.skipTest("pypdf is not installed")
 
         writer = pypdf.PdfWriter()
         writer.add_blank_page(width=72, height=72)
@@ -70,15 +74,41 @@ class DatasheetIngestTests(unittest.TestCase):
             ingestor.ingest_pdf("/nonexistent/fake_datasheet.pdf")
 
     def test_uninstalled_backend_raises_import_error(self):
-        ingestor = DatasheetIngestor(backend="pymupdf")
-        with self.assertRaises(ImportError) as ctx:
-            ingestor.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
-        self.assertIn("PyMuPDF", str(ctx.exception))
+        try:
+            import fitz
+            fitz_available = True
+        except ImportError:
+            fitz_available = False
 
-        ingestor_plumber = DatasheetIngestor(backend="pdfplumber")
-        with self.assertRaises(ImportError) as ctx2:
-            ingestor_plumber.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
-        self.assertIn("pdfplumber", str(ctx2.exception))
+        if fitz_available:
+            with unittest.mock.patch.dict("sys.modules", {"fitz": None}):
+                ingestor = DatasheetIngestor(backend="pymupdf")
+                with self.assertRaises(ImportError) as ctx:
+                    ingestor.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
+                self.assertIn("PyMuPDF", str(ctx.exception))
+        else:
+            ingestor = DatasheetIngestor(backend="pymupdf")
+            with self.assertRaises(ImportError) as ctx:
+                ingestor.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
+            self.assertIn("PyMuPDF", str(ctx.exception))
+
+        try:
+            import pdfplumber
+            pdfplumber_available = True
+        except ImportError:
+            pdfplumber_available = False
+
+        if pdfplumber_available:
+            with unittest.mock.patch.dict("sys.modules", {"pdfplumber": None}):
+                ingestor_plumber = DatasheetIngestor(backend="pdfplumber")
+                with self.assertRaises(ImportError) as ctx2:
+                    ingestor_plumber.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
+                self.assertIn("pdfplumber", str(ctx2.exception))
+        else:
+            ingestor_plumber = DatasheetIngestor(backend="pdfplumber")
+            with self.assertRaises(ImportError) as ctx2:
+                ingestor_plumber.extract_from_bytes(b"%PDF-1.4 mock", "test.pdf")
+            self.assertIn("pdfplumber", str(ctx2.exception))
 
     def test_page_text_helpers(self):
         pages = [

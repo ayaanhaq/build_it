@@ -73,6 +73,9 @@ def validate_datasheet_extraction(
             for req_prov in ("source", "extraction_method", "confidence"):
                 if req_prov not in prov:
                     errors.append(f"[provenance] '{req_prov}' is a required property")
+            conf = prov.get("confidence")
+            if conf is not None and (not isinstance(conf, (int, float)) or conf < 0.0 or conf > 1.0):
+                errors.append("[provenance.confidence] confidence must be between 0.0 and 1.0")
             source = prov.get("source")
             if isinstance(source, dict):
                 for req_src in ("document_name", "document_sha256"):
@@ -81,6 +84,13 @@ def validate_datasheet_extraction(
                 sha = source.get("document_sha256")
                 if sha and (not isinstance(sha, str) or len(sha) != 64 or not all(c in "0123456789abcdefABCDEF" for c in sha)):
                     errors.append("[provenance.source.document_sha256] document_sha256 must be a 64-character hex string")
+            field_prov = prov.get("field_provenance")
+            if isinstance(field_prov, dict):
+                for fkey, fval in field_prov.items():
+                    if isinstance(fval, dict):
+                        for req_f in ("page", "raw_text"):
+                            if req_f not in fval:
+                                errors.append(f"[provenance.field_provenance.{fkey}] '{req_f}' is a required property")
         elif "provenance" in data:
             errors.append("[provenance] provenance must be an object")
 
