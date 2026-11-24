@@ -447,19 +447,19 @@ export function validateStep(
     validatePartVectors(part as ScenePart, partRef, errors);
   }
 
-  // Register all newly observed part IDs into the build context
-  if (seenPartIds) {
-    for (const id of stepPartIds) {
-      seenPartIds.add(id);
-    }
-  }
-
   // Check: Step-level vertex estimate cap
   const maxStepVertices = context.maxVerticesPerStep ?? MAX_VERTICES_PER_STEP;
   if (stepVertices > maxStepVertices) {
     errors.push(
       `Estimated step ${step.stepNumber} vertex total (${stepVertices}) exceeds maximum limit of ${maxStepVertices} vertices.`
     );
+  }
+
+  // Register newly observed part IDs into the build context only when this step passes validation
+  if (seenPartIds && errors.length === 0) {
+    for (const id of stepPartIds) {
+      seenPartIds.add(id);
+    }
   }
 
   if (context.onStepVertices) {
