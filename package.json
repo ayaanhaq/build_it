@@ -11,7 +11,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "python -m unittest discover tests"
+    "test": "python -m unittest discover tests",
+    "generate:scene": "node --experimental-strip-types scripts/generate-scene.ts"
   },
   "repository": {
     "type": "git",
