@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import AIChatInput from "./AIChatInput";
 import { DeskBuilderViewer } from "./DeskBuilderViewer";
 import { Sidebar } from "./Sidebar";
 import { RightPartsWidget } from "./RightPartsWidget";
 import { DESK_BUILD_STEPS } from "./deskData";
-import { ChatSession, ChatMessage } from "./types";
+import { ChatSession, ChatMessage, Scene } from "./types";
 import { getBuildScene, sceneStepToBuildStep } from "./builds";
+import { generate, ENABLE_STREAMING_GENERATION } from "./generate";
+import type { ThreeDeskViewer } from "./three-scene";
 import { Sparkles, Bot, User, Box } from "lucide-react";
 
 export default function App() {
@@ -41,8 +43,16 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [highlightedPartName, setHighlightedPartName] = useState<string | null>(null);
 
+  // Streaming generation state (used when ENABLE_STREAMING_GENERATION flag is active)
+  const viewerRef = useRef<ThreeDeskViewer | null>(null);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationStepCount, setGenerationStepCount] = useState<number>(0);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generatedScenes, setGeneratedScenes] = useState<Record<string, Scene>>({});
+
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
-  const activeScene = getBuildScene(activeSession?.title || "desk");
+  const activeGeneratedScene = activeSessionId ? generatedScenes[activeSessionId] : null;
+  const activeScene = activeGeneratedScene || getBuildScene(activeSession?.title || "desk");
   const activeStepData = activeScene && activeScene.steps[currentStep - 1]
     ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
     : (DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0]);
@@ -58,6 +68,8 @@ export default function App() {
   const handleNewChat = () => {
     setActiveSessionId(null);
     setCurrentStep(1);
+    setGenerationError(null);
+    setGenerationStepCount(0);
   };
 
   const handleDeleteSession = (id: string) => {
@@ -68,9 +80,6 @@ export default function App() {
   };
 
   const handleSendMessage = (text: string) => {
-    // Resolve build by name lookup; defaults to desk scene
-    const scene = getBuildScene(text);
-
     const userMsg: ChatMessage = {
       id: "msg-" + Date.now(),
       sender: "user",
@@ -78,72 +87,168 @@ export default function App() {
       timestamp: "Just now",
     };
 
-    if (!activeSessionId) {
-      // Create new session
-      const newSessionId = "session-" + Date.now();
-      const newSessionTitle = scene.title || "Modern Solid Oak Desk";
+    if (ENABLE_STREAMING_GENERATION) {
+      // Feature flag ON: Streaming generation pipeline via FakeModelClient
+      const sessionId = activeSessionId || "session-" + Date.now();
+      const sessionTitle = text.slice(0, 40) || "Generated 3D Build";
 
-      const newSession: ChatSession = {
-        id: newSessionId,
-        title: newSessionTitle,
-        preview: text,
-        timestamp: "Just now",
-        has3DViewer: true,
-        currentStep: 1,
-        messages: [userMsg],
-      };
-
-      setSessions((prev) => [newSession, ...prev]);
-      setActiveSessionId(newSessionId);
-
-      setTimeout(() => {
-        const botMsg: ChatMessage = {
-          id: "bot-" + Date.now(),
-          sender: "assistant",
-          text: `Here is your step-by-step 3D assembly manual for the ${newSessionTitle}. The parts required for your current step are displayed in the Parts Callout widget on the right. You can rotate, zoom, and inspect every component in 3D.`,
+      if (!activeSessionId) {
+        const newSession: ChatSession = {
+          id: sessionId,
+          title: sessionTitle,
+          preview: text,
           timestamp: "Just now",
-          hasBuildDemo: true,
+          has3DViewer: true,
+          currentStep: 1,
+          messages: [userMsg],
         };
-
+        setSessions((prev) => [newSession, ...prev]);
+        setActiveSessionId(sessionId);
+      } else {
         setSessions((prev) =>
           prev.map((s) =>
-            s.id === newSessionId
-              ? { ...s, messages: [...s.messages, botMsg] }
+            s.id === sessionId
+              ? { ...s, messages: [...s.messages, userMsg], has3DViewer: true }
               : s
           )
         );
-      }, 350);
-    } else {
-      // Append to active session
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === activeSessionId
-            ? { ...s, messages: [...s.messages, userMsg] }
-            : s
-        )
-      );
+      }
 
-      setTimeout(() => {
-        const botMsg: ChatMessage = {
-          id: "bot-" + Date.now(),
-          sender: "assistant",
-          text: `Updated 3D instruction manual for the ${scene.title || "Modern Solid Oak Desk"}. You can navigate the steps and inspect parts on the right.`,
+      setIsGenerating(true);
+      setGenerationError(null);
+      setGenerationStepCount(0);
+
+      const initialScene: Scene = {
+        schemaVersion: 1,
+        name: "generated-" + Date.now(),
+        title: sessionTitle,
+        description: `Streaming 3D generation for: "${text}"`,
+        steps: [],
+      };
+      setGeneratedScenes((prev) => ({ ...prev, [sessionId]: initialScene }));
+
+      generate(text, {
+        onStep: (step, status) => {
+          if (status === "valid" && step) {
+            setGenerationStepCount((c) => c + 1);
+            setGeneratedScenes((prev) => {
+              const current = prev[sessionId] || initialScene;
+              const nextSteps = [...current.steps];
+              const idx = nextSteps.findIndex((s) => s.stepNumber === step.stepNumber);
+              if (idx >= 0) {
+                nextSteps[idx] = step;
+              } else {
+                nextSteps.push(step);
+              }
+              return { ...prev, [sessionId]: { ...current, steps: nextSteps } };
+            });
+
+            // Incrementally append mesh to ThreeDeskViewer scene
+            if (viewerRef.current) {
+              viewerRef.current.appendStep(step);
+              viewerRef.current.setStep(step.stepNumber);
+            }
+            setCurrentStep(step.stepNumber);
+          }
+        },
+      })
+        .then((result) => {
+          setIsGenerating(false);
+          const botMsg: ChatMessage = {
+            id: "bot-" + Date.now(),
+            sender: "assistant",
+            text: result.success
+              ? `Successfully generated 3D assembly instructions for "${text}" (${result.steps.length} steps completed).`
+              : `Generation completed with warnings: ${result.error || "Some steps could not be validated."}`,
+            timestamp: "Just now",
+            hasBuildDemo: true,
+          };
+          if (!result.success && result.error) {
+            setGenerationError(result.error);
+          }
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: [...s.messages, botMsg] }
+                : s
+            )
+          );
+        })
+        .catch((err) => {
+          setIsGenerating(false);
+          setGenerationError(String(err));
+        });
+    } else {
+      // Feature flag OFF (default): keep existing keyword routing / build name lookup and desk fallback
+      const scene = getBuildScene(text);
+
+      if (!activeSessionId) {
+        // Create new session
+        const newSessionId = "session-" + Date.now();
+        const newSessionTitle = scene.title || "Modern Solid Oak Desk";
+
+        const newSession: ChatSession = {
+          id: newSessionId,
+          title: newSessionTitle,
+          preview: text,
           timestamp: "Just now",
-          hasBuildDemo: true,
+          has3DViewer: true,
+          currentStep: 1,
+          messages: [userMsg],
         };
 
+        setSessions((prev) => [newSession, ...prev]);
+        setActiveSessionId(newSessionId);
+
+        setTimeout(() => {
+          const botMsg: ChatMessage = {
+            id: "bot-" + Date.now(),
+            sender: "assistant",
+            text: `Here is your step-by-step 3D assembly manual for the ${newSessionTitle}. The parts required for your current step are displayed in the Parts Callout widget on the right. You can rotate, zoom, and inspect every component in 3D.`,
+            timestamp: "Just now",
+            hasBuildDemo: true,
+          };
+
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === newSessionId
+                ? { ...s, messages: [...s.messages, botMsg] }
+                : s
+            )
+          );
+        }, 350);
+      } else {
+        // Append to active session
         setSessions((prev) =>
           prev.map((s) =>
             s.id === activeSessionId
-              ? {
-                  ...s,
-                  has3DViewer: true,
-                  messages: [...s.messages, botMsg],
-                }
+              ? { ...s, messages: [...s.messages, userMsg] }
               : s
           )
         );
-      }, 350);
+
+        setTimeout(() => {
+          const botMsg: ChatMessage = {
+            id: "bot-" + Date.now(),
+            sender: "assistant",
+            text: `Updated 3D instruction manual for the ${scene.title || "Modern Solid Oak Desk"}. You can navigate the steps and inspect parts on the right.`,
+            timestamp: "Just now",
+            hasBuildDemo: true,
+          };
+
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === activeSessionId
+                ? {
+                    ...s,
+                    has3DViewer: true,
+                    messages: [...s.messages, botMsg],
+                  }
+                : s
+            )
+          );
+        }, 350);
+      }
     }
   };
 
@@ -254,6 +359,10 @@ export default function App() {
                           showEmbeddedPartsCard={!rightWidgetOpen}
                           highlightedPartName={highlightedPartName}
                           onPartSelected={(name) => setHighlightedPartName(name)}
+                          viewerRef={viewerRef}
+                          isGenerating={isGenerating}
+                          generationStepCount={generationStepCount}
+                          generationError={generationError}
                         />
                       </div>
                     )}

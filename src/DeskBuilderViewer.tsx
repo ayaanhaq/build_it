@@ -10,6 +10,8 @@ import {
   ChevronRight,
   RotateCw,
   Layers,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 
 interface DeskBuilderViewerProps {
@@ -19,6 +21,10 @@ interface DeskBuilderViewerProps {
   showEmbeddedPartsCard?: boolean;
   highlightedPartName?: string | null;
   onPartSelected?: (partName: string) => void;
+  viewerRef?: React.MutableRefObject<ThreeDeskViewer | null>;
+  isGenerating?: boolean;
+  generationStepCount?: number;
+  generationError?: string | null;
 }
 
 export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
@@ -28,9 +34,14 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
   showEmbeddedPartsCard = false,
   highlightedPartName,
   onPartSelected,
+  viewerRef: externalViewerRef,
+  isGenerating = false,
+  generationStepCount = 0,
+  generationError = null,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<ThreeDeskViewer | null>(null);
+  const internalViewerRef = useRef<ThreeDeskViewer | null>(null);
+  const viewerRef = externalViewerRef || internalViewerRef;
 
   const activeScene = scene || DESK_SCENE;
   const [internalStep, setInternalStep] = useState<number>(1);
@@ -136,6 +147,22 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
         ref={containerRef}
         className="relative w-full flex-1 cursor-grab active:cursor-grabbing outline-none"
       />
+
+      {/* Generation Loading State Badge */}
+      {isGenerating && (
+        <div className="absolute top-4 left-4 z-30 flex items-center gap-2.5 bg-amber-500/20 border border-amber-500/40 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-amber-300 shadow-xl">
+          <Loader2 size={14} className="animate-spin text-amber-400" />
+          <span>Generating 3D model steps... ({generationStepCount} completed)</span>
+        </div>
+      )}
+
+      {/* Generation Error Banner */}
+      {generationError && (
+        <div className="absolute top-4 left-4 right-4 z-30 flex items-center gap-2 bg-red-950/90 border border-red-500/50 backdrop-blur-md px-4 py-2.5 rounded-2xl text-xs text-red-200 shadow-2xl">
+          <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
+          <span className="truncate">Generation error: {generationError}</span>
+        </div>
+      )}
 
       {/* HeyClicky Analytical Leader Line Callout Capsule */}
       {hoverCallout && (
