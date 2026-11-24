@@ -104,6 +104,23 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertIn("```json", res["preservedDescription"])
         self.assertTrue(res["valid"])
 
+    def test_retry_reuses_part_id_from_failed_step(self):
+        res = self.data["retryReusesFailedStepPartId"]
+        self.assertTrue(res["success"], f"Expected retry reusing 'shelf-1' to succeed, got error: {res.get('error')}")
+        self.assertEqual(res["stepCount"], 2)
+        self.assertEqual(res["retriesCount"], 1)
+        self.assertTrue(res["valid"])
+
+    def test_real_duplicate_across_valid_steps_rejected(self):
+        res = self.data["realDuplicateAcrossValidStepsRejected"]
+        self.assertFalse(res["success"])
+        self.assertEqual(res["stepCount"], 1)
+        self.assertIn(
+            "Duplicate part ID 'shelf-1' already exists in an earlier step. Part IDs must be unique across the whole build.",
+            res["error"],
+        )
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

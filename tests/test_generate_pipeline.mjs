@@ -19,6 +19,8 @@ const testResults = {
   fencedSplitAcrossChunks: {},
   unclosedFenceFailsClearly: {},
   plainUnfencedWithBackticksInJsonString: {},
+  retryReusesFailedStepPartId: {},
+  realDuplicateAcrossValidStepsRejected: {},
   passed: true,
 };
 
@@ -316,6 +318,120 @@ async function runTests() {
       resPlain.steps[0]?.description === 'Literal ```json and ``` inside JSON string field.',
   };
   if (!testResults.plainUnfencedWithBackticksInJsonString.valid) testResults.passed = false;
+
+  // 11. Retry reusing part ID 'shelf-1' from failed step 2 is accepted
+  const badShelfStep2 = {
+    stepNumber: 2,
+    title: 'Step 2: Shelf Board (Oversized)',
+    parts: [
+      {
+        id: 'shelf-1',
+        name: 'Shelf Board',
+        primitive: 'box',
+        dimensions: { width: 6000, height: 25, depth: 300 }, // exceeds 5000 mm bound
+        position: { x: 0, y: 400, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const fixedShelfStep2 = {
+    stepNumber: 2,
+    title: 'Step 2: Shelf Board (Fixed)',
+    parts: [
+      {
+        id: 'shelf-1',
+        name: 'Shelf Board',
+        primitive: 'box',
+        dimensions: { width: 800, height: 25, depth: 300 },
+        position: { x: 0, y: 400, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const reuseClient = new FakeModelClient([
+    [makeStepJson(1) + '\n', JSON.stringify(badShelfStep2) + '\n'],
+    [JSON.stringify(fixedShelfStep2) + '\n'],
+  ]);
+  const resReuse = await generateScene('bookcase reuse id on retry', reuseClient);
+
+  testResults.retryReusesFailedStepPartId = {
+    success: resReuse.success,
+    stepCount: resReuse.steps.length,
+    retriesCount: resReuse.retriesLogged.length,
+    error: resReuse.error ?? '',
+    valid:
+      resReuse.success === true &&
+      resReuse.steps.length === 2 &&
+      resReuse.retriesLogged.length === 1 &&
+      resReuse.steps[1]?.parts?.[0]?.id === 'shelf-1',
+  };
+  if (!testResults.retryReusesFailedStepPartId.valid) testResults.passed = false;
+
+  // 12. Real duplicate part ID across two valid steps is still rejected with exact error text
+  const validShelfStep1 = {
+    stepNumber: 1,
+    title: 'Step 1: First Shelf',
+    parts: [
+      {
+        id: 'shelf-1',
+        name: 'First Shelf',
+        primitive: 'box',
+        dimensions: { width: 800, height: 25, depth: 300 },
+        position: { x: 0, y: 200, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+    ],
+  };
+  const validDuplicateShelfStep2 = {
+    stepNumber: 2,
+    title: 'Step 2: Duplicate Shelf',
+    parts: [
+      {
+        id: 'shelf-1',
+        name: 'Duplicate Shelf',
+        primitive: 'box',
+        dimensions: { width: 800, height: 25, depth: 300 },
+        position: { x: 0, y: 600, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const dupClient = new FakeModelClient([
+    [JSON.stringify(validShelfStep1) + '\n', JSON.stringify(validDuplicateShelfStep2) + '\n'],
+  ]);
+  const resDup = await generateScene('bookcase real duplicate id', dupClient, {
+    maxRetriesPerStep: 0,
+  });
+
+  const expectedDupText =
+    "Duplicate part ID 'shelf-1' already exists in an earlier step. Part IDs must be unique across the whole build.";
+  testResults.realDuplicateAcrossValidStepsRejected = {
+    success: resDup.success,
+    stepCount: resDup.steps.length,
+    error: resDup.error ?? '',
+    valid:
+      resDup.success === false &&
+      resDup.steps.length === 1 &&
+      typeof resDup.error === 'string' &&
+      resDup.error.includes(expectedDupText),
+  };
+  if (!testResults.realDuplicateAcrossValidStepsRejected.valid) testResults.passed = false;
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }
