@@ -1,12 +1,18 @@
 import React, { useState, useRef } from "react";
 import AIChatInput from "./AIChatInput";
-import { DeskBuilderViewer } from "./DeskBuilderViewer";
+import {
+  DeskBuilderViewer,
+  type GenerationUiStatus,
+} from "./DeskBuilderViewer";
 import { Sidebar } from "./Sidebar";
 import { RightPartsWidget } from "./RightPartsWidget";
 import { DESK_BUILD_STEPS } from "./deskData";
-import { ChatSession, ChatMessage, Scene } from "./types";
+import { ChatSession, ChatMessage, Scene, SceneStep } from "./types";
 import { getBuildScene, sceneStepToBuildStep } from "./builds";
-import { generate, ENABLE_STREAMING_GENERATION } from "./generate";
+import {
+  streamGenerateScene,
+  isStreamingGenerationEnabled,
+} from "./generate";
 import type { ThreeDeskViewer } from "./three-scene";
 import { Sparkles, Bot, User, Box } from "lucide-react";
 
@@ -43,22 +49,44 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [highlightedPartName, setHighlightedPartName] = useState<string | null>(null);
 
-  // Streaming generation state (used when ENABLE_STREAMING_GENERATION flag is active)
+  // Streaming generation state (active when VITE_ENABLE_STREAMING_GENERATION=true)
   const viewerRef = useRef<ThreeDeskViewer | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingStepsRef = useRef<SceneStep[]>([]);
+  const pendingViewerStepsRef = useRef<SceneStep[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationStatus, setGenerationStatus] =
+    useState<GenerationUiStatus>("idle");
   const [generationStepCount, setGenerationStepCount] = useState<number>(0);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [streamedSteps, setStreamedSteps] = useState<SceneStep[]>([]);
+  const [skipLoadSceneName, setSkipLoadSceneName] = useState<string | null>(
+    null
+  );
   const [generatedScenes, setGeneratedScenes] = useState<Record<string, Scene>>({});
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const activeGeneratedScene = activeSessionId ? generatedScenes[activeSessionId] : null;
   const activeScene = activeGeneratedScene || getBuildScene(activeSession?.title || "desk");
-  const activeStepData = activeScene && activeScene.steps[currentStep - 1]
-    ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
-    : (DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0]);
+
+  const activeStepData =
+    isGenerating && streamedSteps.length > 0 && streamedSteps[currentStep - 1]
+      ? sceneStepToBuildStep(streamedSteps[currentStep - 1])
+      : activeScene && activeScene.steps[currentStep - 1]
+      ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
+      : isGenerating && streamedSteps.length === 0
+      ? {
+          stepNumber: 1,
+          title: "Waiting for first build step...",
+          subtitle: "Streaming",
+          description: "Generating validated 3D assembly instructions...",
+          parts: [],
+        }
+      : DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0];
 
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
+    setSkipLoadSceneName(null);
     const s = sessions.find((item) => item.id === id);
     if (s && s.currentStep) {
       setCurrentStep(s.currentStep);
@@ -66,16 +94,38 @@ export default function App() {
   };
 
   const handleNewChat = () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    pendingViewerStepsRef.current = [];
+    streamingStepsRef.current = [];
     setActiveSessionId(null);
     setCurrentStep(1);
+    setIsGenerating(false);
+    setGenerationStatus("idle");
     setGenerationError(null);
     setGenerationStepCount(0);
+    setStreamedSteps([]);
+    setSkipLoadSceneName(null);
   };
 
   const handleDeleteSession = (id: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSessionId === id) {
       setActiveSessionId(null);
+    }
+  };
+
+  const handleCancelGeneration = () => {
+    abortControllerRef.current?.abort();
+  };
+
+  const handleViewerReady = (viewer: ThreeDeskViewer) => {
+    if (pendingViewerStepsRef.current.length > 0) {
+      const queued = [...pendingViewerStepsRef.current];
+      pendingViewerStepsRef.current = [];
+      for (const step of queued) {
+        viewer.appendStep(step);
+      }
     }
   };
 
@@ -87,97 +137,192 @@ export default function App() {
       timestamp: "Just now",
     };
 
-    if (ENABLE_STREAMING_GENERATION) {
-      // Feature flag ON: Streaming generation pipeline via FakeModelClient
+    if (isStreamingGenerationEnabled()) {
       const sessionId = activeSessionId || "session-" + Date.now();
       const sessionTitle = text.slice(0, 40) || "Generated 3D Build";
+      const statusMsgId = "bot-" + Date.now();
+      const sceneName = "generated-" + Date.now();
 
-      if (!activeSessionId) {
-        const newSession: ChatSession = {
-          id: sessionId,
-          title: sessionTitle,
-          preview: text,
-          timestamp: "Just now",
-          has3DViewer: true,
-          currentStep: 1,
-          messages: [userMsg],
-        };
-        setSessions((prev) => [newSession, ...prev]);
-        setActiveSessionId(sessionId);
-      } else {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === sessionId
-              ? { ...s, messages: [...s.messages, userMsg], has3DViewer: true }
-              : s
-          )
-        );
-      }
-
-      setIsGenerating(true);
-      setGenerationError(null);
-      setGenerationStepCount(0);
-
-      const initialScene: Scene = {
+      const emptyScene: Scene = {
         schemaVersion: 1,
-        name: "generated-" + Date.now(),
+        name: sceneName,
         title: sessionTitle,
         description: `Streaming 3D generation for: "${text}"`,
         steps: [],
       };
-      setGeneratedScenes((prev) => ({ ...prev, [sessionId]: initialScene }));
 
-      generate(text, {
-        onStep: (step, status) => {
-          if (status === "valid" && step) {
-            setGenerationStepCount((c) => c + 1);
-            setGeneratedScenes((prev) => {
-              const current = prev[sessionId] || initialScene;
-              const nextSteps = [...current.steps];
-              const idx = nextSteps.findIndex((s) => s.stepNumber === step.stepNumber);
-              if (idx >= 0) {
-                nextSteps[idx] = step;
-              } else {
-                nextSteps.push(step);
-              }
-              return { ...prev, [sessionId]: { ...current, steps: nextSteps } };
-            });
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-            // Incrementally append mesh to ThreeDeskViewer scene
-            if (viewerRef.current) {
-              viewerRef.current.appendStep(step);
-              viewerRef.current.setStep(step.stepNumber);
+      const updateAssistantMessage = (
+        msgText: string,
+        hasBuildDemo: boolean = true
+      ) => {
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            const hasStatusMsg = s.messages.some((m) => m.id === statusMsgId);
+            if (hasStatusMsg) {
+              return {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === statusMsgId
+                    ? { ...m, text: msgText, hasBuildDemo }
+                    : m
+                ),
+              };
             }
-            setCurrentStep(step.stepNumber);
-          }
-        },
-      })
-        .then((result) => {
-          setIsGenerating(false);
-          const botMsg: ChatMessage = {
-            id: "bot-" + Date.now(),
-            sender: "assistant",
-            text: result.success
-              ? `Successfully generated 3D assembly instructions for "${text}" (${result.steps.length} steps completed).`
-              : `Generation completed with warnings: ${result.error || "Some steps could not be validated."}`,
+            const botMsg: ChatMessage = {
+              id: statusMsgId,
+              sender: "assistant",
+              text: msgText,
+              timestamp: "Just now",
+              hasBuildDemo,
+            };
+            return {
+              ...s,
+              messages: [...s.messages, botMsg],
+            };
+          })
+        );
+      };
+
+      const mountStreamingMessage = () => {
+        const streamingBotMsg: ChatMessage = {
+          id: statusMsgId,
+          sender: "assistant",
+          text: `Generating 3D assembly instructions for "${text}"...`,
+          timestamp: "Just now",
+          hasBuildDemo: true,
+        };
+
+        if (!activeSessionId) {
+          const newSession: ChatSession = {
+            id: sessionId,
+            title: sessionTitle,
+            preview: text,
             timestamp: "Just now",
-            hasBuildDemo: true,
+            has3DViewer: true,
+            currentStep: 1,
+            messages: [userMsg, streamingBotMsg],
           };
-          if (!result.success && result.error) {
-            setGenerationError(result.error);
-          }
+          setSessions((prev) => [newSession, ...prev]);
+          setActiveSessionId(sessionId);
+        } else {
           setSessions((prev) =>
             prev.map((s) =>
               s.id === sessionId
-                ? { ...s, messages: [...s.messages, botMsg] }
+                ? {
+                    ...s,
+                    has3DViewer: true,
+                    messages: [
+                      ...s.messages.map((m) =>
+                        m.hasBuildDemo ? { ...m, hasBuildDemo: false } : m
+                      ),
+                      userMsg,
+                      streamingBotMsg,
+                    ],
+                  }
                 : s
             )
           );
-        })
-        .catch((err) => {
+        }
+      };
+
+      const startedFromNewChat = !activeSessionId;
+      if (startedFromNewChat) {
+        setGeneratedScenes((prev) => ({ ...prev, [sessionId]: emptyScene }));
+      }
+
+      mountStreamingMessage();
+
+      setIsGenerating(true);
+      setGenerationStatus("streaming");
+      setGenerationError(null);
+      setGenerationStepCount(0);
+      setSkipLoadSceneName(null);
+      streamingStepsRef.current = [];
+      pendingViewerStepsRef.current = [];
+      setStreamedSteps([]);
+
+      void streamGenerateScene(text, {
+        signal: controller.signal,
+        viewer: {
+          appendStep: (step, animateTransition) => {
+            if (viewerRef.current) {
+              return viewerRef.current.appendStep(step, animateTransition);
+            }
+            pendingViewerStepsRef.current.push(step);
+            return undefined;
+          },
+          loadScene: (s) => {
+            viewerRef.current?.loadScene(s);
+          },
+          setStep: (stepNum, animate) => {
+            viewerRef.current?.setStep(stepNum, animate);
+          },
+        },
+        onOpen: () => {
+          // Only reset when replacing an existing fixed scene (e.g. default desk);
+          // new-chat sessions already start empty.
+          if (!startedFromNewChat && viewerRef.current) {
+            viewerRef.current.loadScene(emptyScene);
+          }
+          setSkipLoadSceneName(sceneName);
+          setGeneratedScenes((prev) => ({ ...prev, [sessionId]: emptyScene }));
+        },
+        onStep: (step, count) => {
+          const nextSteps = [...streamingStepsRef.current, step];
+          streamingStepsRef.current = nextSteps;
+          setGenerationStepCount(count);
+          setStreamedSteps(nextSteps);
+          setCurrentStep(step.stepNumber);
+        },
+        onDone: ({ stepCount, steps }) => {
+          abortControllerRef.current = null;
           setIsGenerating(false);
-          setGenerationError(String(err));
-        });
+          setGenerationStatus("complete");
+          setSkipLoadSceneName(sceneName);
+          setGeneratedScenes((prev) => ({
+            ...prev,
+            [sessionId]: { ...emptyScene, steps: [...steps] },
+          }));
+          updateAssistantMessage(
+            `Successfully generated 3D assembly instructions for "${text}" (${stepCount} steps completed).`
+          );
+        },
+        onCancel: ({ stepCount, steps }) => {
+          abortControllerRef.current = null;
+          setIsGenerating(false);
+          setGenerationStatus("cancelled");
+          if (steps.length > 0) {
+            setSkipLoadSceneName(sceneName);
+            setGeneratedScenes((prev) => ({
+              ...prev,
+              [sessionId]: { ...emptyScene, steps: [...steps] },
+            }));
+          }
+          updateAssistantMessage(
+            `Generation cancelled (${stepCount} ${
+              stepCount === 1 ? "step" : "steps"
+            } rendered and preserved).`
+          );
+        },
+        onError: ({ message, steps }) => {
+          abortControllerRef.current = null;
+          setIsGenerating(false);
+          setGenerationStatus("error");
+          setGenerationError(message);
+          if (steps.length > 0) {
+            setSkipLoadSceneName(sceneName);
+            setGeneratedScenes((prev) => ({
+              ...prev,
+              [sessionId]: { ...emptyScene, steps: [...steps] },
+            }));
+          }
+          updateAssistantMessage(`Generation error: ${message}`);
+        },
+      });
     } else {
       // Feature flag OFF (default): keep existing keyword routing / build name lookup and desk fallback
       const scene = getBuildScene(text);
@@ -258,6 +403,12 @@ export default function App() {
 
   const hasMessages = activeSession && activeSession.messages.length > 0;
   const showRightWidget = hasMessages && activeSession?.has3DViewer;
+  const rightWidgetTotalSteps =
+    isGenerating && streamedSteps.length > 0
+      ? streamedSteps.length
+      : activeScene
+      ? activeScene.steps.length
+      : DESK_BUILD_STEPS.length;
 
   return (
     <div className="min-h-screen w-full bg-black text-white flex overflow-x-hidden">
@@ -354,15 +505,20 @@ export default function App() {
                       <div className="w-full mt-2">
                         <DeskBuilderViewer
                           scene={activeScene}
+                          streamedSteps={isGenerating ? streamedSteps : undefined}
+                          skipLoadSceneName={skipLoadSceneName}
                           currentStep={currentStep}
                           onStepChange={(s) => setCurrentStep(s)}
                           showEmbeddedPartsCard={!rightWidgetOpen}
                           highlightedPartName={highlightedPartName}
                           onPartSelected={(name) => setHighlightedPartName(name)}
                           viewerRef={viewerRef}
+                          onViewerReady={handleViewerReady}
                           isGenerating={isGenerating}
+                          generationStatus={generationStatus}
                           generationStepCount={generationStepCount}
                           generationError={generationError}
+                          onCancelGeneration={handleCancelGeneration}
                         />
                       </div>
                     )}
@@ -390,7 +546,7 @@ export default function App() {
         <RightPartsWidget
           step={activeStepData}
           currentStep={currentStep}
-          totalSteps={activeScene ? activeScene.steps.length : DESK_BUILD_STEPS.length}
+          totalSteps={rightWidgetTotalSteps}
           isOpen={rightWidgetOpen}
           onToggle={() => setRightWidgetOpen((prev) => !prev)}
           onStepSelect={(step) => setCurrentStep(step)}

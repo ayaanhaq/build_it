@@ -2,54 +2,95 @@ import React, { useEffect, useRef, useState } from "react";
 import { ThreeDeskViewer } from "./three-scene";
 import { DESK_BUILD_STEPS } from "./deskData";
 import { LegoPartsCard } from "./LegoPartsCard";
-import type { Scene } from "./types";
+import type { Scene, SceneStep } from "./types";
 import { DESK_SCENE } from "./fixtures/desk.scene";
 import { sceneStepToBuildStep } from "./builds";
 import {
   ChevronLeft,
   ChevronRight,
   RotateCw,
-  Layers,
   Loader2,
   AlertTriangle,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
+
+export type GenerationUiStatus =
+  | "idle"
+  | "streaming"
+  | "complete"
+  | "error"
+  | "cancelled";
 
 interface DeskBuilderViewerProps {
   scene?: Scene;
+  streamedSteps?: SceneStep[];
+  skipLoadSceneName?: string | null;
   currentStep?: number;
   onStepChange?: (step: number) => void;
   showEmbeddedPartsCard?: boolean;
   highlightedPartName?: string | null;
   onPartSelected?: (partName: string) => void;
   viewerRef?: React.MutableRefObject<ThreeDeskViewer | null>;
+  onViewerReady?: (viewer: ThreeDeskViewer) => void;
   isGenerating?: boolean;
+  generationStatus?: GenerationUiStatus;
   generationStepCount?: number;
   generationError?: string | null;
+  onCancelGeneration?: () => void;
 }
 
 export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
   scene,
+  streamedSteps,
+  skipLoadSceneName = null,
   currentStep: externalStep,
   onStepChange: externalOnStepChange,
   showEmbeddedPartsCard = false,
   highlightedPartName,
   onPartSelected,
   viewerRef: externalViewerRef,
+  onViewerReady,
   isGenerating = false,
+  generationStatus = "idle",
   generationStepCount = 0,
   generationError = null,
+  onCancelGeneration,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const internalViewerRef = useRef<ThreeDeskViewer | null>(null);
   const viewerRef = externalViewerRef || internalViewerRef;
+  const hasMountedRef = useRef<boolean>(false);
+  const lastLoadedSceneRef = useRef<Scene | undefined>(scene);
 
   const activeScene = scene || DESK_SCENE;
+  const displaySteps =
+    streamedSteps && streamedSteps.length > 0
+      ? streamedSteps
+      : activeScene
+      ? activeScene.steps
+      : [];
   const [internalStep, setInternalStep] = useState<number>(1);
   const currentStep = externalStep !== undefined ? externalStep : internalStep;
-  const totalSteps = activeScene ? activeScene.steps.length : DESK_BUILD_STEPS.length;
-  const activeStepData = activeScene && activeScene.steps[currentStep - 1]
-    ? sceneStepToBuildStep(activeScene.steps[currentStep - 1])
-    : (DESK_BUILD_STEPS[currentStep - 1] || DESK_BUILD_STEPS[0]);
+  const totalSteps = displaySteps.length;
+  const safeCurrentStep =
+    totalSteps > 0 ? Math.max(1, Math.min(currentStep, totalSteps)) : 1;
+  const activeStepData =
+    displaySteps[safeCurrentStep - 1]
+      ? sceneStepToBuildStep(displaySteps[safeCurrentStep - 1])
+      : totalSteps === 0
+      ? {
+          stepNumber: 1,
+          title: isGenerating
+            ? "Waiting for first build step..."
+            : activeScene?.title || "3D Build Viewer",
+          subtitle: "Streaming",
+          description: isGenerating
+            ? "Generating validated 3D assembly instructions..."
+            : "Send a request to generate build steps.",
+          parts: [],
+        }
+      : DESK_BUILD_STEPS[0];
 
   // Hover callout state (Pass 8 Analytical 2D Leader Callouts)
   const [hoverCallout, setHoverCallout] = useState<{
@@ -84,6 +125,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
       },
     });
     viewerRef.current = viewer;
+    onViewerReady?.(viewer);
 
     return () => {
       viewer.destroy();
@@ -91,12 +133,30 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
     };
   }, []);
 
-  // Sync scene changes
+  // Sync scene changes only for fixed/finished scenes, never while actively streaming
   useEffect(() => {
-    if (viewerRef.current && scene) {
-      viewerRef.current.loadScene(scene);
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      lastLoadedSceneRef.current = scene;
+      return;
     }
-  }, [scene]);
+    if (isGenerating || !scene || scene === lastLoadedSceneRef.current) {
+      return;
+    }
+    lastLoadedSceneRef.current = scene;
+    if (skipLoadSceneName && scene.name === skipLoadSceneName) {
+      return;
+    }
+    if (viewerRef.current) {
+      viewerRef.current.loadScene(scene);
+      if (externalStep !== undefined && scene.steps.length > 0) {
+        viewerRef.current.setStep(
+          Math.min(externalStep, scene.steps.length),
+          false
+        );
+      }
+    }
+  }, [scene, isGenerating, skipLoadSceneName]);
 
   // Sync external step changes
   useEffect(() => {
@@ -148,11 +208,44 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
         className="relative w-full flex-1 cursor-grab active:cursor-grabbing outline-none"
       />
 
-      {/* Generation Loading State Badge */}
-      {isGenerating && (
-        <div className="absolute top-4 left-4 z-30 flex items-center gap-2.5 bg-amber-500/20 border border-amber-500/40 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-amber-300 shadow-xl">
-          <Loader2 size={14} className="animate-spin text-amber-400" />
-          <span>Generating 3D model steps... ({generationStepCount} completed)</span>
+      {/* Generation Loading State & Cancel Button */}
+      {(isGenerating || generationStatus === "streaming") && (
+        <div className="absolute top-4 left-4 right-4 z-30 flex items-center justify-between gap-3 pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-2.5 bg-amber-500/20 border border-amber-500/40 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-amber-300 shadow-xl">
+            <Loader2 size={14} className="animate-spin text-amber-400" />
+            <span>
+              Generating build steps... ({generationStepCount} completed)
+            </span>
+          </div>
+
+          {onCancelGeneration && (
+            <button
+              type="button"
+              onClick={onCancelGeneration}
+              className="pointer-events-auto flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-red-500/20 hover:bg-red-500/35 border border-red-400/50 text-xs font-mono font-semibold text-red-200 backdrop-blur-md transition shadow-xl"
+            >
+              <XCircle size={14} className="text-red-400" />
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Generation Complete State Badge */}
+      {!isGenerating && generationStatus === "complete" && !generationError && (
+        <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-emerald-500/20 border border-emerald-500/40 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-emerald-300 shadow-xl">
+          <CheckCircle2 size={14} className="text-emerald-400" />
+          <span>Build complete ({generationStepCount} steps)</span>
+        </div>
+      )}
+
+      {/* Generation Cancelled State Badge */}
+      {!isGenerating && generationStatus === "cancelled" && !generationError && (
+        <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-amber-500/15 border border-amber-400/40 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-amber-200 shadow-xl">
+          <XCircle size={14} className="text-amber-400" />
+          <span>
+            Generation was cancelled ({generationStepCount} steps rendered)
+          </span>
         </div>
       )}
 
@@ -160,7 +253,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
       {generationError && (
         <div className="absolute top-4 left-4 right-4 z-30 flex items-center gap-2 bg-red-950/90 border border-red-500/50 backdrop-blur-md px-4 py-2.5 rounded-2xl text-xs text-red-200 shadow-2xl">
           <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
-          <span className="truncate">Generation error: {generationError}</span>
+          <span className="truncate">{generationError}</span>
         </div>
       )}
 
@@ -195,7 +288,7 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex-1 min-w-0 pr-4">
             <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider inline-block mb-1 whitespace-nowrap">
-              Step {currentStep} of {totalSteps}
+              {totalSteps > 0 ? `Step ${safeCurrentStep} of ${totalSteps}` : "Preparing build"}
             </span>
             <h3 className="text-base md:text-lg font-bold text-white truncate">
               {activeStepData.title}
@@ -208,14 +301,14 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
           <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-shrink-0">
             <button
               onClick={handlePrev}
-              disabled={currentStep === 1}
+              disabled={safeCurrentStep <= 1 || totalSteps === 0}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 text-white font-semibold text-xs hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition"
             >
               <ChevronLeft size={16} />
               Previous
             </button>
 
-            {currentStep < totalSteps ? (
+            {safeCurrentStep < totalSteps ? (
               <button
                 onClick={handleNext}
                 className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs hover:bg-amber-400 transition shadow-lg shadow-amber-500/20"
@@ -226,7 +319,8 @@ export const DeskBuilderViewer: React.FC<DeskBuilderViewerProps> = ({
             ) : (
               <button
                 onClick={() => handleStepChange(1)}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-500 text-black font-bold text-xs hover:bg-emerald-400 transition shadow-lg shadow-emerald-500/20"
+                disabled={totalSteps === 0}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-500 text-black font-bold text-xs hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed transition shadow-lg shadow-emerald-500/20"
               >
                 Replay Build
                 <RotateCw size={14} />
