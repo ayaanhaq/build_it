@@ -70,6 +70,35 @@ python3 main.py examples/pir_bad_5v.json
 # Exits with 1; prints: 5.0V sensor output 'pir.OUT' cannot directly drive 3.3V GPIO pin 'pi.GPIO17'
 ```
 
+### Running 3D Scene Generation (Live CLI)
+
+Requires Node.js v22+ with installed packages (`npm ci`).
+
+#### Environment Variables
+- `GEMINI_API_KEY` *(required for live runs)*: Your Google AI Studio / Gemini API key (never printed to output, stderr, or saved files).
+- `GEMINI_MODEL` *(optional)*: Gemini model ID override. Defaults to `gemini-3.8-flash`.
+
+#### Live Run Command
+```bash
+# macOS / Linux (bash)
+GEMINI_API_KEY=your_api_key node --experimental-strip-types scripts/generate-scene.ts "build a 4-shelf bookcase"
+```
+
+```powershell
+# Windows (PowerShell)
+$env:GEMINI_API_KEY="your_api_key"; npm run generate:scene -- "build a 4-shelf bookcase"
+```
+
+Useful options:
+- `--dry-run`: Prints the assembled generation prompt without requiring `GEMINI_API_KEY` or making network calls.
+- `--save <path>`: Writes `{ "schemaVersion": 1, "request": "...", "complete": true|false, "steps": [...] }` to a JSON file. If generation fails partway through, a partial file is still written with `"complete": false`.
+- `--debug`: Streams raw model text chunks to `stderr` (with the API key redacted) and includes redacted `rawOutput` when `--save` is used.
+
+#### What a Successful Run Looks Like
+- Each validated assembly step is streamed to `stdout` as a compact JSON object on its own line (`{"stepNumber":1,"title":"...","parts":[...]}`).
+- With `--save output/bookcase.json`, the saved file contains `"complete": true` and the ordered array of validated `steps`.
+- The command exits with status code `0` (on validation or API failure, diagnostics print to `stderr` and the process exits non-zero).
+
 ---
 
 ## System Architecture
