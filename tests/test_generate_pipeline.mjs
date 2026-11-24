@@ -21,6 +21,12 @@ const testResults = {
   plainUnfencedWithBackticksInJsonString: {},
   retryReusesFailedStepPartId: {},
   realDuplicateAcrossValidStepsRejected: {},
+  prettyPrinted20Lines: {},
+  bracesInsideStringValue: {},
+  escapedQuotesInString: {},
+  missingClosingBraceAtCapAndEof: {},
+  malformedObjectPreservesLaterPrettyObjects: {},
+  fencedPrettyPrintedStream: {},
   passed: true,
 };
 
@@ -432,6 +438,140 @@ async function runTests() {
       resDup.error.includes(expectedDupText),
   };
   if (!testResults.realDuplicateAcrossValidStepsRejected.valid) testResults.passed = false;
+
+  // 13. Pretty-printed JSON step across ~20 lines parses
+  const prettyStep1Obj = JSON.parse(makeStepJson(1, { title: 'Step 1: Pretty Multi-Line' }));
+  const prettyText = JSON.stringify(prettyStep1Obj, null, 2);
+  const prettyLineCount = prettyText.split('\n').length;
+  const prettyChunks = [
+    prettyText.slice(0, Math.floor(prettyText.length / 2)),
+    prettyText.slice(Math.floor(prettyText.length / 2)) + '\n',
+  ];
+  const resPretty = await generateScene('pretty printed 20-line step', new FakeModelClient([prettyChunks]));
+
+  testResults.prettyPrinted20Lines = {
+    success: resPretty.success,
+    lineCount: prettyLineCount,
+    stepCount: resPretty.steps.length,
+    stepTitle: resPretty.steps[0]?.title ?? '',
+    valid:
+      resPretty.success === true &&
+      prettyLineCount >= 18 &&
+      resPretty.steps.length === 1 &&
+      resPretty.steps[0]?.title === 'Step 1: Pretty Multi-Line',
+  };
+  if (!testResults.prettyPrinted20Lines.valid) testResults.passed = false;
+
+  // 14. Braces inside a string value ("{" and "}") do not end the object early
+  const bracesStepJson = JSON.stringify(
+    JSON.parse(
+      makeStepJson(1, {
+        title: 'Braces { open and } close inside {nested} value',
+        description: '} leading close { and trailing {',
+      })
+    ),
+    null,
+    2
+  );
+  const parsedBracesItems = [];
+  for await (const item of parseStreamedSteps([bracesStepJson])) {
+    parsedBracesItems.push(item);
+  }
+  testResults.bracesInsideStringValue = {
+    itemCount: parsedBracesItems.length,
+    hasStep: Boolean(parsedBracesItems[0]?.step),
+    title: parsedBracesItems[0]?.step?.title ?? '',
+    description: parsedBracesItems[0]?.step?.description ?? '',
+    valid:
+      parsedBracesItems.length === 1 &&
+      parsedBracesItems[0]?.step?.title === 'Braces { open and } close inside {nested} value' &&
+      parsedBracesItems[0]?.step?.description === '} leading close { and trailing {',
+  };
+  if (!testResults.bracesInsideStringValue.valid) testResults.passed = false;
+
+  // 15. Escaped quotes inside strings (and escaped backslashes) are handled
+  const escapedStepJson = JSON.stringify(
+    JSON.parse(
+      makeStepJson(1, {
+        title: 'Quote \\" } \\" and backslash \\\\"',
+      })
+    ),
+    null,
+    2
+  );
+  const parsedEscapedItems = [];
+  for await (const item of parseStreamedSteps([escapedStepJson.slice(0, 35), escapedStepJson.slice(35)])) {
+    parsedEscapedItems.push(item);
+  }
+  testResults.escapedQuotesInString = {
+    itemCount: parsedEscapedItems.length,
+    title: parsedEscapedItems[0]?.step?.title ?? '',
+    valid:
+      parsedEscapedItems.length === 1 &&
+      parsedEscapedItems[0]?.step?.title === 'Quote \\" } \\" and backslash \\\\"',
+  };
+  if (!testResults.escapedQuotesInString.valid) testResults.passed = false;
+
+  // 16. Missing closing brace produces an error at EOF and at the 64 KB cap
+  const unclosedAtEofItems = [];
+  for await (const item of parseStreamedSteps(['{\n  "stepNumber": 1,\n  "title": "No closing brace"'])) {
+    unclosedAtEofItems.push(item);
+  }
+  const eofError = unclosedAtEofItems.find((i) => typeof i.error === 'string')?.error ?? '';
+
+  const hugePadding = 'x'.repeat(65 * 1024);
+  const overCapItems = [];
+  for await (const item of parseStreamedSteps([`{"stepNumber": 1, "description": "${hugePadding}"`])) {
+    overCapItems.push(item);
+  }
+  const capError = overCapItems.find((i) => typeof i.error === 'string')?.error ?? '';
+
+  testResults.missingClosingBraceAtCapAndEof = {
+    eofError,
+    capError,
+    valid:
+      eofError.toLowerCase().includes('unclosed') &&
+      capError.toLowerCase().includes('64 kb'),
+  };
+  if (!testResults.missingClosingBraceAtCapAndEof.valid) testResults.passed = false;
+
+  // 17. One malformed pretty-printed object does not stop later objects from parsing
+  const malformedPrettyStream = [
+    JSON.stringify(JSON.parse(makeStepJson(1)), null, 2) + '\n',
+    '{\n  THIS IS BROKEN,\n  "bad": true\n}\n',
+    JSON.stringify(JSON.parse(makeStepJson(2)), null, 2) + '\n',
+  ];
+  const malformedPrettyItems = [];
+  for await (const item of parseStreamedSteps(malformedPrettyStream)) {
+    malformedPrettyItems.push(item);
+  }
+  testResults.malformedObjectPreservesLaterPrettyObjects = {
+    itemCount: malformedPrettyItems.length,
+    firstStepNum: malformedPrettyItems[0]?.step?.stepNumber,
+    secondIsError: typeof malformedPrettyItems[1]?.error === 'string',
+    thirdStepNum: malformedPrettyItems[2]?.step?.stepNumber,
+    valid:
+      malformedPrettyItems.length === 3 &&
+      malformedPrettyItems[0]?.step?.stepNumber === 1 &&
+      typeof malformedPrettyItems[1]?.error === 'string' &&
+      malformedPrettyItems[2]?.step?.stepNumber === 2,
+  };
+  if (!testResults.malformedObjectPreservesLaterPrettyObjects.valid) testResults.passed = false;
+
+  // 18. A fenced, pretty-printed stream parses end-to-end
+  const fencedPrettyChunks = [
+    '```json\n',
+    JSON.stringify(JSON.parse(makeStepJson(1)), null, 2) + '\n',
+    JSON.stringify(JSON.parse(makeStepJson(2)), null, 2) + '\n',
+    '```\n',
+  ];
+  const resFencedPretty = await generateScene('fenced pretty build', new FakeModelClient([fencedPrettyChunks]));
+  testResults.fencedPrettyPrintedStream = {
+    success: resFencedPretty.success,
+    stepCount: resFencedPretty.steps.length,
+    valid: resFencedPretty.success === true && resFencedPretty.steps.length === 2,
+  };
+  if (!testResults.fencedPrettyPrintedStream.valid) testResults.passed = false;
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }

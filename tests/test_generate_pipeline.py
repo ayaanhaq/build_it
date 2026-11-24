@@ -121,6 +121,45 @@ class GeneratePipelineTests(unittest.TestCase):
         )
         self.assertTrue(res["valid"])
 
+    def test_pretty_printed_20_line_step_parses(self):
+        res = self.data["prettyPrinted20Lines"]
+        self.assertTrue(res["success"])
+        self.assertGreaterEqual(res["lineCount"], 18)
+        self.assertEqual(res["stepCount"], 1)
+        self.assertEqual(res["stepTitle"], "Step 1: Pretty Multi-Line")
+        self.assertTrue(res["valid"])
+
+    def test_braces_inside_string_do_not_end_object_early(self):
+        res = self.data["bracesInsideStringValue"]
+        self.assertEqual(res["itemCount"], 1)
+        self.assertTrue(res["hasStep"])
+        self.assertTrue(res["valid"])
+
+    def test_escaped_quotes_inside_string_handled(self):
+        res = self.data["escapedQuotesInString"]
+        self.assertEqual(res["itemCount"], 1)
+        self.assertTrue(res["valid"])
+
+    def test_missing_closing_brace_errors_at_cap_and_eof(self):
+        res = self.data["missingClosingBraceAtCapAndEof"]
+        self.assertIn("unclosed", res["eofError"].lower())
+        self.assertIn("64 kb", res["capError"].lower())
+        self.assertTrue(res["valid"])
+
+    def test_malformed_pretty_object_preserves_later_objects(self):
+        res = self.data["malformedObjectPreservesLaterPrettyObjects"]
+        self.assertEqual(res["itemCount"], 3)
+        self.assertEqual(res["firstStepNum"], 1)
+        self.assertTrue(res["secondIsError"])
+        self.assertEqual(res["thirdStepNum"], 2)
+        self.assertTrue(res["valid"])
+
+    def test_fenced_pretty_printed_stream_parses(self):
+        res = self.data["fencedPrettyPrintedStream"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

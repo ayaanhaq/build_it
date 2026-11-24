@@ -206,24 +206,154 @@ async function* preprocessMarkdownFences(
 }
 
 /**
- * Parses newline-delimited JSON chunks from a stream.
- * Strips surrounding Markdown code fences before line parsing.
- * Buffers partial lines across chunk boundaries.
- * Reports malformed JSON per line as an error without terminating the stream.
+ * Maximum size in UTF-8 bytes allowed for a single pending (unclosed) JSON object.
+ */
+export const MAX_PENDING_OBJECT_BYTES = 64 * 1024;
+
+export interface ExtractedJsonItem {
+  objectText?: string;
+  error?: string;
+  rawText: string;
+}
+
+function utf8CodePointBytes(ch: string): number {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp <= 0x7f) return 1;
+  if (cp <= 0x7ff) return 2;
+  if (cp <= 0xffff) return 3;
+  return 4;
+}
+
+/**
+ * Extracts brace-balanced JSON objects from a stream of text chunks.
+ * Ignores braces inside JSON strings (including escaped quotes).
+ * Caps a single pending object at MAX_PENDING_OBJECT_BYTES (64 KB).
+ */
+export async function* extractBraceBalancedObjects(
+  chunks: AsyncIterable<string> | Iterable<string>,
+  maxPendingBytes: number = MAX_PENDING_OBJECT_BYTES
+): AsyncGenerator<ExtractedJsonItem, void, unknown> {
+  let pending = "";
+  let pendingBytes = 0;
+  let stray = "";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for await (const chunk of chunks) {
+    for (const ch of chunk) {
+      if (depth === 0) {
+        if (ch === "{") {
+          if (stray.trim()) {
+            const trimmedStray = stray.trim();
+            yield { objectText: trimmedStray, rawText: trimmedStray };
+          }
+          stray = "";
+          depth = 1;
+          pending = "{";
+          pendingBytes = 1;
+          inString = false;
+          escaped = false;
+        } else if (ch === "\n") {
+          if (stray.trim()) {
+            const trimmedStray = stray.trim();
+            yield { objectText: trimmedStray, rawText: trimmedStray };
+          }
+          stray = "";
+        } else if (stray.length > 0 || !/\s/.test(ch)) {
+          stray += ch;
+        }
+        continue;
+      }
+
+      pending += ch;
+      pendingBytes += utf8CodePointBytes(ch);
+
+      if (pendingBytes > maxPendingBytes) {
+        yield {
+          error: `Pending JSON object exceeded ${Math.round(maxPendingBytes / 1024)} KB cap (${maxPendingBytes} bytes): missing closing '}'.`,
+          rawText: pending.slice(0, 200),
+        };
+        pending = "";
+        pendingBytes = 0;
+        depth = 0;
+        inString = false;
+        escaped = false;
+        return;
+      }
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+      } else {
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === "{") {
+          depth++;
+        } else if (ch === "}") {
+          depth--;
+          if (depth === 0) {
+            const completed = pending;
+            pending = "";
+            pendingBytes = 0;
+            inString = false;
+            escaped = false;
+            yield { objectText: completed, rawText: completed };
+          }
+        }
+      }
+    }
+  }
+
+  if (stray.trim()) {
+    const trimmedStray = stray.trim();
+    yield { objectText: trimmedStray, rawText: trimmedStray };
+  }
+
+  if (depth > 0 && pending.trim()) {
+    yield {
+      error: "Unexpected end of stream: unclosed JSON object missing closing '}'.",
+      rawText: pending.trim(),
+    };
+  }
+}
+
+/**
+ * Parses streamed JSON step objects from a stream.
+ * Strips surrounding Markdown code fences first, then extracts brace-balanced
+ * JSON objects across lines and chunk boundaries.
+ * Reports malformed JSON or unclosed objects per item without stopping valid later items.
  */
 export async function* parseStreamedSteps(
   chunks: AsyncIterable<string> | Iterable<string>
 ): AsyncGenerator<ParsedStreamItem, void, unknown> {
-  for await (const item of preprocessMarkdownFences(chunks)) {
-    if (item.error) {
+  const fenceErrors: FencePreprocessItem[] = [];
+
+  async function* strippedTextStream(): AsyncGenerator<string, void, unknown> {
+    for await (const item of preprocessMarkdownFences(chunks)) {
+      if (item.error) {
+        fenceErrors.push(item);
+      } else if (item.line !== undefined) {
+        yield item.line + "\n";
+      }
+    }
+  }
+
+  for await (const extracted of extractBraceBalancedObjects(strippedTextStream())) {
+    if (extracted.error) {
       yield {
-        error: item.error,
-        rawLine: item.rawLine ?? "",
+        error: extracted.error,
+        rawLine: extracted.rawText,
       };
       continue;
     }
 
-    const trimmed = item.line?.trim();
+    const trimmed = extracted.objectText?.trim();
     if (!trimmed) continue;
 
     try {
@@ -235,6 +365,13 @@ export async function* parseStreamedSteps(
         rawLine: trimmed,
       };
     }
+  }
+
+  for (const fenceErr of fenceErrors) {
+    yield {
+      error: fenceErr.error ?? "Markdown code fence error.",
+      rawLine: fenceErr.rawLine ?? "",
+    };
   }
 }
 
