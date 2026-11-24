@@ -115,47 +115,124 @@ export interface ParsedStreamItem {
   rawLine: string;
 }
 
+interface FencePreprocessItem {
+  line?: string;
+  error?: string;
+  rawLine?: string;
+}
+
+/**
+ * Removes leading and trailing Markdown code fences (including language tags
+ * such as ```json) across chunk boundaries without altering content inside
+ * JSON strings. Emits an error item at EOF if an opening fence was never closed.
+ */
+async function* preprocessMarkdownFences(
+  chunks: AsyncIterable<string> | Iterable<string>
+): AsyncGenerator<FencePreprocessItem, void, unknown> {
+  let buffer = "";
+  let fenceOpen = false;
+  let openFenceMarker = "";
+
+  const processCompletedLine = (rawLine: string): FencePreprocessItem[] => {
+    const lineWithoutCr = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const trimmed = lineWithoutCr.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    // Case 1: Line is purely a Markdown fence marker (e.g. "```", "```json")
+    const pureFenceMatch = trimmed.match(/^```([a-zA-Z0-9_-]*)$/);
+    if (pureFenceMatch) {
+      if (!fenceOpen) {
+        fenceOpen = true;
+        openFenceMarker = trimmed;
+        return [];
+      }
+      if (pureFenceMatch[1] === "") {
+        fenceOpen = false;
+        openFenceMarker = "";
+        return [];
+      }
+      // Nested opening marker inside an already-open fence; leave fenceOpen true
+      return [];
+    }
+
+    let content = trimmed;
+
+    // Case 2: Inline opening fence immediately preceding a JSON object (e.g. ```json{...})
+    if (!fenceOpen) {
+      const inlineOpenMatch = content.match(/^```(?:[a-zA-Z0-9_-]+)?\s*(\{[\s\S]*)$/);
+      if (inlineOpenMatch) {
+        fenceOpen = true;
+        openFenceMarker = "```";
+        content = inlineOpenMatch[1];
+      }
+    }
+
+    // Case 3: Inline closing fence at the end of a JSON object line (e.g. {...}```)
+    if (fenceOpen && /\}\s*```$/.test(content)) {
+      content = content.replace(/\s*```$/, "");
+      fenceOpen = false;
+      openFenceMarker = "";
+    }
+
+    return [{ line: content }];
+  };
+
+  for await (const chunk of chunks) {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      for (const item of processCompletedLine(line)) {
+        yield item;
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    for (const item of processCompletedLine(buffer)) {
+      yield item;
+    }
+  }
+
+  if (fenceOpen) {
+    yield {
+      error: "Unclosed Markdown code fence in model output: missing closing ```.",
+      rawLine: openFenceMarker,
+    };
+  }
+}
+
 /**
  * Parses newline-delimited JSON chunks from a stream.
+ * Strips surrounding Markdown code fences before line parsing.
  * Buffers partial lines across chunk boundaries.
  * Reports malformed JSON per line as an error without terminating the stream.
  */
 export async function* parseStreamedSteps(
   chunks: AsyncIterable<string> | Iterable<string>
 ): AsyncGenerator<ParsedStreamItem, void, unknown> {
-  let buffer = "";
-
-  for await (const chunk of chunks) {
-    buffer += chunk;
-    const lines = buffer.split("\n");
-    // All elements except the last are completed lines
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const step = JSON.parse(trimmed) as SceneStep;
-        yield { step, rawLine: trimmed };
-      } catch (err: any) {
-        yield {
-          error: `Malformed JSON on line: ${err.message}`,
-          rawLine: trimmed,
-        };
-      }
+  for await (const item of preprocessMarkdownFences(chunks)) {
+    if (item.error) {
+      yield {
+        error: item.error,
+        rawLine: item.rawLine ?? "",
+      };
+      continue;
     }
-  }
 
-  // Handle any remaining trailing buffer content
-  const trailing = buffer.trim();
-  if (trailing) {
+    const trimmed = item.line?.trim();
+    if (!trimmed) continue;
+
     try {
-      const step = JSON.parse(trailing) as SceneStep;
-      yield { step, rawLine: trailing };
+      const step = JSON.parse(trimmed) as SceneStep;
+      yield { step, rawLine: trimmed };
     } catch (err: any) {
       yield {
         error: `Malformed JSON on line: ${err.message}`,
-        rawLine: trailing,
+        rawLine: trimmed,
       };
     }
   }

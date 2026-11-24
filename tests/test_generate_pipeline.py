@@ -77,6 +77,33 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertEqual(res["thirdStepNum"], 2)
         self.assertTrue(res["valid"])
 
+    def test_fenced_single_line_output_parses(self):
+        res = self.data["fencedSingleLineOutput"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertTrue(res["valid"])
+
+    def test_fenced_split_across_chunks_parses(self):
+        res = self.data["fencedSplitAcrossChunks"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 1)
+        self.assertIn("```", res["preservedTitle"])
+        self.assertTrue(res["valid"])
+
+    def test_unclosed_fence_fails_with_clear_error(self):
+        res = self.data["unclosedFenceFailsClearly"]
+        self.assertFalse(res["success"])
+        self.assertIn("closing", res["streamError"].lower())
+        self.assertIn("closing", res["pipelineError"].lower())
+        self.assertTrue(res["valid"])
+
+    def test_plain_unfenced_stream_with_backticks_in_string_passes(self):
+        res = self.data["plainUnfencedWithBackticksInJsonString"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 1)
+        self.assertIn("```json", res["preservedDescription"])
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

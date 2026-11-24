@@ -15,6 +15,10 @@ const testResults = {
   neverFixedExceedsRetries: {},
   partialLineSplitAcrossChunks: {},
   malformedJsonLinePreservesRemaining: {},
+  fencedSingleLineOutput: {},
+  fencedSplitAcrossChunks: {},
+  unclosedFenceFailsClearly: {},
+  plainUnfencedWithBackticksInJsonString: {},
   passed: true,
 };
 
@@ -226,6 +230,92 @@ async function runTests() {
       parsedMalformedItems[2]?.step?.stepNumber === 2,
   };
   if (!testResults.malformedJsonLinePreservesRemaining.valid) testResults.passed = false;
+
+  // 7. Fenced single-line output (with ```json and ```) parses cleanly
+  const fencedStream = [
+    '```json\n' + makeStepJson(1) + '\n' + makeStepJson(2) + '\n```\n',
+  ];
+  const fencedClient = new FakeModelClient([fencedStream]);
+  const resFenced = await generateScene('fenced build', fencedClient);
+
+  testResults.fencedSingleLineOutput = {
+    success: resFenced.success,
+    stepCount: resFenced.steps.length,
+    valid: resFenced.success && resFenced.steps.length === 2,
+  };
+  if (!testResults.fencedSingleLineOutput.valid) testResults.passed = false;
+
+  // 8. Fence split across chunks parses and preserves backticks inside JSON strings
+  const stepWithBackticks = makeStepJson(1, {
+    title: 'Step 1: Keep ``` inside string',
+  });
+  const splitFenceChunks = [
+    '``',
+    '`js',
+    'on\n',
+    stepWithBackticks.slice(0, 28),
+    stepWithBackticks.slice(28, 60),
+    stepWithBackticks.slice(60) + '\n',
+    '``',
+    '`\n',
+  ];
+  const splitFenceClient = new FakeModelClient([splitFenceChunks]);
+  const resSplitFence = await generateScene('split fence build', splitFenceClient);
+
+  testResults.fencedSplitAcrossChunks = {
+    success: resSplitFence.success,
+    stepCount: resSplitFence.steps.length,
+    preservedTitle: resSplitFence.steps[0]?.title ?? '',
+    valid:
+      resSplitFence.success &&
+      resSplitFence.steps.length === 1 &&
+      resSplitFence.steps[0]?.title === 'Step 1: Keep ``` inside string',
+  };
+  if (!testResults.fencedSplitAcrossChunks.valid) testResults.passed = false;
+
+  // 9. Unclosed fence fails with a clear error (no closing ```)
+  const unclosedChunks = ['```json\n' + makeStepJson(1) + '\n'];
+  const unclosedStreamItems = [];
+  for await (const item of parseStreamedSteps(unclosedChunks)) {
+    unclosedStreamItems.push(item);
+  }
+  const streamErr = unclosedStreamItems.find((i) => typeof i.error === 'string')?.error ?? '';
+
+  const unclosedClient = new FakeModelClient([unclosedChunks]);
+  const resUnclosed = await generateScene('unclosed fence build', unclosedClient, {
+    maxRetriesPerStep: 0,
+  });
+
+  testResults.unclosedFenceFailsClearly = {
+    success: resUnclosed.success,
+    streamError: streamErr,
+    pipelineError: resUnclosed.error ?? '',
+    valid:
+      resUnclosed.success === false &&
+      streamErr.toLowerCase().includes('closing') &&
+      (resUnclosed.error ?? '').toLowerCase().includes('closing'),
+  };
+  if (!testResults.unclosedFenceFailsClearly.valid) testResults.passed = false;
+
+  // 10. Plain unfenced stream passes unchanged and leaves backticks in JSON strings intact
+  const plainChunks = [
+    makeStepJson(1, {
+      description: 'Literal ```json and ``` inside JSON string field.',
+    }) + '\n',
+  ];
+  const plainClient = new FakeModelClient([plainChunks]);
+  const resPlain = await generateScene('plain unfenced build', plainClient);
+
+  testResults.plainUnfencedWithBackticksInJsonString = {
+    success: resPlain.success,
+    stepCount: resPlain.steps.length,
+    preservedDescription: resPlain.steps[0]?.description ?? '',
+    valid:
+      resPlain.success &&
+      resPlain.steps.length === 1 &&
+      resPlain.steps[0]?.description === 'Literal ```json and ``` inside JSON string field.',
+  };
+  if (!testResults.plainUnfencedWithBackticksInJsonString.valid) testResults.passed = false;
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }
