@@ -1,9 +1,9 @@
-import { validateScene } from '../src/sceneValidator.ts';
+import { validateScene, validateStep } from '../src/sceneValidator.ts';
 import fs from 'fs';
 
 try {
   const input = fs.readFileSync(0, 'utf8');
-  let scene = JSON.parse(input);
+  let data = JSON.parse(input);
 
   // Revive test sentinels for NaN / Infinity
   const revive = (obj) => {
@@ -22,8 +22,22 @@ try {
     return obj;
   };
 
-  scene = revive(scene);
-  const errors = validateScene(scene);
+  data = revive(data);
+
+  let errors = [];
+  if (data && data._mode === 'step') {
+    const context = data.context || {};
+    if (Array.isArray(context.seenPartIds)) {
+      context.seenPartIds = new Set(context.seenPartIds);
+    }
+    if (Array.isArray(context.validStepNumbers)) {
+      context.validStepNumbers = new Set(context.validStepNumbers);
+    }
+    errors = validateStep(data.step, context);
+  } else {
+    errors = validateScene(data);
+  }
+
   process.stdout.write(JSON.stringify(errors));
 } catch (err) {
   process.stderr.write(String(err));
