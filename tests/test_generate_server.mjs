@@ -1,3 +1,6 @@
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startGenerateServer } from "../server/generateServer.ts";
 import { FakeModelClient } from "../src/generatePipeline.ts";
 
@@ -9,6 +12,7 @@ const results = {
   keyRedactedAcrossEventsAndErrors: {},
   missingKeyReturns500: {},
   portEnvOverrideRespected: {},
+  failedStepsWriteSanitizedFailureLog: {},
   passed: true,
 };
 
@@ -397,6 +401,85 @@ async function runTests() {
       if (!valid) results.passed = false;
     } finally {
       await closeServer(server);
+    }
+  }
+
+  // 8. Step validation failure after retries writes logs/failed-steps-<timestamp>.json without key or headers
+  {
+    const fakeKey = "FAKE_LOG_SECRET_KEY_XYZ_123";
+    const tempLogDir = mkdtempSync(join(tmpdir(), "build-it-fail-log-"));
+    const badStep2Attempt0 = `{"stepNumber":2,"title":"Attempt 0 (${fakeKey})","parts":[{"id":"bad_p","step":2,"primitive":"box","dimensions":{"width":99999,"height":10,"depth":10},"position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0},"color":"tan","material":"oak","qty":1}]}\n`;
+    const badStep2Attempt1 = `{"stepNumber":2,"title":"Attempt 1","parts":[{"id":"bad_p","step":2,"primitive":"invalid_r1"}]}\n`;
+    const badStep2Attempt2 = `{"stepNumber":2,"title":"Attempt 2","parts":[{"id":"bad_p","step":2,"primitive":"invalid_r2"}]}\n`;
+    const badStep2Attempt3 = `{"stepNumber":2,"title":"Attempt 3","parts":[{"id":"bad_p","step":2,"primitive":"invalid_r3"}]}\n`;
+
+    const { server, url } = await startGenerateServer({
+      port: 0,
+      logDir: tempLogDir,
+      env: { GEMINI_API_KEY: fakeKey },
+      clientFactory: () =>
+        new FakeModelClient([
+          [makeStepJson(1) + "\n", badStep2Attempt0],
+          [badStep2Attempt1],
+          [badStep2Attempt2],
+          [badStep2Attempt3],
+        ]),
+    });
+
+    try {
+      const resp = await fetch(`${url}/api/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173",
+          "X-Custom-Auth-Header": "HEADER_SECRET_DO_NOT_LOG",
+        },
+        body: JSON.stringify({ request: "bookcase failure log test" }),
+      });
+      await resp.text();
+
+      const files = readdirSync(tempLogDir).filter((f) =>
+        /^failed-steps-.*\.json$/.test(f)
+      );
+      const logContent =
+        files.length === 1
+          ? readFileSync(join(tempLogDir, files[0]), "utf8")
+          : "";
+      const parsedLog = logContent ? JSON.parse(logContent) : null;
+      const attempts = parsedLog?.attempts ?? [];
+
+      const valid =
+        files.length === 1 &&
+        attempts.length === 4 &&
+        attempts[0]?.attempt === 0 &&
+        attempts[1]?.attempt === 1 &&
+        attempts[2]?.attempt === 2 &&
+        attempts[3]?.attempt === 3 &&
+        attempts.every(
+          (a) =>
+            Array.isArray(a.errors) &&
+            a.errors.length > 0 &&
+            typeof a.rawText === "string" &&
+            a.rawText.length > 0
+        ) &&
+        attempts[0].rawText.includes("Attempt 0 ([REDACTED])") &&
+        attempts[1].rawText.includes("invalid_r1") &&
+        attempts[3].rawText.includes("invalid_r3") &&
+        !logContent.includes(fakeKey) &&
+        !logContent.includes("HEADER_SECRET_DO_NOT_LOG") &&
+        !logContent.includes("X-Custom-Auth-Header");
+
+      results.failedStepsWriteSanitizedFailureLog = {
+        fileCount: files.length,
+        attemptNumbers: attempts.map((a) => a.attempt),
+        containsKey: logContent.includes(fakeKey),
+        containsHeader: logContent.includes("HEADER_SECRET_DO_NOT_LOG"),
+        valid,
+      };
+      if (!valid) results.passed = false;
+    } finally {
+      await closeServer(server);
+      rmSync(tempLogDir, { recursive: true, force: true });
     }
   }
 

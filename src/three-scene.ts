@@ -509,6 +509,47 @@ export function removeStep(
   return true;
 }
 
+export const DEFAULT_DESK_CAMERA_TARGET_Y = 18;
+
+/**
+ * Computes the orbit camera target from the bounding box of currently visible step groups.
+ * Keeps the hand-built desk fixture's framing target unchanged at (0, 18, 0),
+ * and centers other models vertically on (min.y + max.y) / 2.
+ */
+export function computeCameraTargetForGroups(
+  stepGroups: Map<number, THREE.Group>,
+  maxVisibleStep: number,
+  sceneName?: string | null
+): THREE.Vector3 {
+  if (sceneName === "desk") {
+    return new THREE.Vector3(0, DEFAULT_DESK_CAMERA_TARGET_Y, 0);
+  }
+
+  const box = new THREE.Box3();
+  for (const [stepNum, group] of stepGroups.entries()) {
+    if (stepNum > maxVisibleStep || !group.visible) {
+      continue;
+    }
+    const prevY = group.position.y;
+    if (prevY !== 0) {
+      group.position.y = 0;
+    }
+    group.updateMatrixWorld(true);
+    box.expandByObject(group);
+    if (prevY !== 0) {
+      group.position.y = prevY;
+      group.updateMatrixWorld(true);
+    }
+  }
+
+  if (box.isEmpty() || !Number.isFinite(box.min.y) || !Number.isFinite(box.max.y)) {
+    return new THREE.Vector3(0, DEFAULT_DESK_CAMERA_TARGET_Y, 0);
+  }
+
+  const centerY = (box.min.y + box.max.y) / 2;
+  return new THREE.Vector3(0, centerY, 0);
+}
+
 /**
  * Builds Three.js meshes from a validated Scene contract.
  * Implemented on top of appendStep.
@@ -937,7 +978,24 @@ export class ThreeDeskViewer {
     }
 
     this.setStep(step.stepNumber, animateTransition);
+    this.updateTargetFromVisibleParts();
     return group;
+  }
+
+  public getCameraTarget(): THREE.Vector3 {
+    return this.target.clone();
+  }
+
+  private updateTargetFromVisibleParts(): void {
+    const effectiveSceneName =
+      this.currentScene === null ? "desk" : (this.currentScene.name ?? "generated");
+    const nextTarget = computeCameraTargetForGroups(
+      this.stepGroups,
+      this.currentStep,
+      effectiveSceneName
+    );
+    this.target.copy(nextTarget);
+    this.updateCameraPosition();
   }
 
   /**
@@ -1209,6 +1267,8 @@ export class ThreeDeskViewer {
       this.targetPhi = stepConfig.cameraPreset.phi;
       this.targetTheta = stepConfig.cameraPreset.theta;
     }
+
+    this.updateTargetFromVisibleParts();
   }
 
   public highlightPartByName(name: string | null): void {

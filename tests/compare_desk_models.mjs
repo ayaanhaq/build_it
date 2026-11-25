@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { DESK_SCENE } from '../src/fixtures/desk.scene.ts';
+import { LATHE_SCENE } from '../src/fixtures/lathe.scene.ts';
+import { BEVEL_SCENE } from '../src/fixtures/bevel.scene.ts';
+import { SPRING_SCENE } from '../src/fixtures/spring.scene.ts';
 import { validateScene } from '../src/sceneValidator.ts';
 import {
   buildSceneModel,
@@ -8,6 +11,8 @@ import {
   removeStep,
   createEmptySceneModel,
   PRIMITIVE_BUILDERS,
+  computeCameraTargetForGroups,
+  DEFAULT_DESK_CAMERA_TARGET_Y,
 } from '../src/three-scene.ts';
 
 try {
@@ -127,6 +132,57 @@ try {
     spring: PRIMITIVE_BUILDERS.spring({ radius: 5, height: 30, coils: 4 }) instanceof THREE.BufferGeometry,
   };
 
+  // 9. Camera target height test: 180 cm tall model -> target y ≈ 90; desk fixture keeps y = 18
+  const tallBookcaseScene = {
+    schemaVersion: 1,
+    name: 'bookcase',
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Upright Frame',
+        parts: [
+          {
+            id: 'side-l',
+            name: 'Left Panel',
+            primitive: 'box',
+            dimensions: { width: 2, height: 180, depth: 30 },
+            position: { x: -39, y: 90, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            color: 'tan',
+            material: 'oak',
+            step: 1,
+            qty: 1,
+          },
+        ],
+      },
+    ],
+  };
+  const tallBookcaseModel = buildSceneModel(tallBookcaseScene);
+  const bookcaseTarget = computeCameraTargetForGroups(tallBookcaseModel.stepGroups, 1, tallBookcaseScene.name);
+  const unnamedTarget = computeCameraTargetForGroups(tallBookcaseModel.stepGroups, 1, undefined);
+  // Simulate mid-animation y=14 group offset: resting vertical center must still be 90
+  const step1Group = tallBookcaseModel.stepGroups.get(1);
+  if (step1Group) step1Group.position.y = 14;
+  const midAnimTarget = computeCameraTargetForGroups(tallBookcaseModel.stepGroups, 1, tallBookcaseScene.name);
+
+  const deskStep1Target = computeCameraTargetForGroups(sceneModel.stepGroups, 1, DESK_SCENE.name);
+  const deskFullTarget = computeCameraTargetForGroups(sceneModel.stepGroups, 6, DESK_SCENE.name);
+
+  const latheTarget = computeCameraTargetForGroups(buildSceneModel(LATHE_SCENE).stepGroups, 1, LATHE_SCENE.name);
+  const bevelTarget = computeCameraTargetForGroups(buildSceneModel(BEVEL_SCENE).stepGroups, 1, BEVEL_SCENE.name);
+  const springTarget = computeCameraTargetForGroups(buildSceneModel(SPRING_SCENE).stepGroups, 1, SPRING_SCENE.name);
+
+  const cameraTargetValid =
+    Math.abs(bookcaseTarget.y - 90) < 1e-4 &&
+    Math.abs(unnamedTarget.y - 90) < 1e-4 &&
+    Math.abs(midAnimTarget.y - 90) < 1e-4 &&
+    deskStep1Target.y === DEFAULT_DESK_CAMERA_TARGET_Y &&
+    deskFullTarget.y === DEFAULT_DESK_CAMERA_TARGET_Y &&
+    DEFAULT_DESK_CAMERA_TARGET_Y === 18 &&
+    Math.abs(latheTarget.y - 60) < 1e-4 &&
+    Math.abs(bevelTarget.y - 10) < 1e-4 &&
+    Math.abs(springTarget.y - 0) < 0.1;
+
   const result = {
     valid: validationErrors.length === 0,
     validationErrors,
@@ -152,6 +208,17 @@ try {
     partialFiveStepStepCount: 2,
     undoValid,
     primitiveSmokeTest,
+    cameraTargetCheck: {
+      bookcaseTargetY: bookcaseTarget.y,
+      unnamedTargetY: unnamedTarget.y,
+      midAnimTargetY: midAnimTarget.y,
+      deskStep1TargetY: deskStep1Target.y,
+      deskFullTargetY: deskFullTarget.y,
+      latheTargetY: latheTarget.y,
+      bevelTargetY: bevelTarget.y,
+      springTargetY: springTarget.y,
+      valid: cameraTargetValid,
+    },
     passed:
       validationErrors.length === 0 &&
       handBuilt.allInteractiveMeshes.length === 24 &&
@@ -160,7 +227,8 @@ try {
       partMismatches.length === 0 &&
       incrementalMatchesFull &&
       partialFiveStepValid &&
-      undoValid,
+      undoValid &&
+      cameraTargetValid,
   };
 
   process.stdout.write(JSON.stringify(result, null, 2));

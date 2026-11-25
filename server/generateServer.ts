@@ -16,7 +16,8 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALLOWED_PALETTE_NAMES,
@@ -50,6 +51,46 @@ export interface GenerateServerDependencies {
   }) => ModelClient;
   schema?: unknown;
   port?: number;
+  logDir?: string;
+}
+
+export interface FailedStepAttemptLog {
+  attempt: number;
+  errors: string[];
+  rawText: string;
+}
+
+function getDefaultLogDir(): string {
+  return fileURLToPath(new URL("../logs", import.meta.url));
+}
+
+function writeFailedStepLog(
+  logDir: string,
+  request: string,
+  errorMessage: string,
+  attempts: FailedStepAttemptLog[],
+  secrets?: string[]
+): string {
+  mkdirSync(logDir, { recursive: true });
+  const timestamp = new Date().toISOString();
+  const safeStamp = timestamp.replace(/[:.]/g, "-");
+  const logPath = join(logDir, `failed-steps-${safeStamp}.json`);
+  const payload = {
+    timestamp,
+    request: redactSecret(request, secrets),
+    error: redactSecret(errorMessage, secrets),
+    attempts: attempts.map((entry) => ({
+      attempt: entry.attempt,
+      errors: entry.errors.map((e) => redactSecret(e, secrets)),
+      rawText: redactSecret(entry.rawText, secrets),
+    })),
+  };
+  const serialized = redactSecret(
+    JSON.stringify(payload, null, 2) + "\n",
+    secrets
+  );
+  writeFileSync(logPath, serialized, "utf8");
+  return logPath;
 }
 
 class HttpRequestError extends Error {
@@ -220,6 +261,7 @@ export function createGenerateServer(
   const provider = resolveLlmProvider(env);
   const providerSpec = getProviderEnvSpec(provider);
   const schema = deps.schema ?? loadSceneSchema();
+  const logDir = deps.logDir ?? getDefaultLogDir();
   let isGenerating = false;
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -327,10 +369,23 @@ export function createGenerateServer(
       ? deps.clientFactory({ provider, apiKey, model })
       : createProviderModelClient({ provider, apiKey, model });
 
+    const streamChunksByCall: string[][] = [];
+    let currentRetryAttempt = 0;
+    let failedAttempts: FailedStepAttemptLog[] = [];
+
     const guardedClient: ModelClient = {
       async *generateStream(prompt: string): AsyncIterable<string> {
         if (clientDisconnected) {
           throw abortError;
+        }
+
+        const chunkBucket: string[] = [];
+        const bucketIdx =
+          currentRetryAttempt === 0 ? 0 : streamChunksByCall.length;
+        if (currentRetryAttempt === 0) {
+          streamChunksByCall[0] = chunkBucket;
+        } else {
+          streamChunksByCall[bucketIdx] = chunkBucket;
         }
 
         const innerStream = baseClient.generateStream(prompt);
@@ -360,6 +415,9 @@ export function createGenerateServer(
               await iterator.return?.();
               throw abortError;
             }
+            if (typeof next.value === "string") {
+              chunkBucket.push(redactSecret(next.value, secretsForRedaction));
+            }
             yield next.value;
           }
         } finally {
@@ -381,13 +439,37 @@ export function createGenerateServer(
         schema,
         primitiveTable: PRIMITIVE_BOUNDS,
         paletteNames: ALLOWED_PALETTE_NAMES,
-        onStep: (step: SceneStep | undefined, status: "valid" | "invalid") => {
+        onStep: (
+          step: SceneStep | undefined,
+          status: "valid" | "invalid",
+          errors?: string[]
+        ) => {
           if (status === "valid" && step) {
             stepCount++;
+            failedAttempts = [];
+            currentRetryAttempt = 0;
             if (!clientDisconnected && !res.writableEnded) {
               res.write(formatSseEvent("step", step, secretsForRedaction));
             }
+          } else if (status === "invalid") {
+            const rawChunks =
+              currentRetryAttempt === 0
+                ? streamChunksByCall[0] ?? []
+                : streamChunksByCall[streamChunksByCall.length - 1] ?? [];
+            if (currentRetryAttempt === 0) {
+              failedAttempts = [];
+            }
+            failedAttempts.push({
+              attempt: currentRetryAttempt,
+              errors: (errors ?? []).map((e) =>
+                redactSecret(e, secretsForRedaction)
+              ),
+              rawText: redactSecret(rawChunks.join(""), secretsForRedaction),
+            });
           }
+        },
+        onRetry: (_stepNumber: number, attempt: number) => {
+          currentRetryAttempt = attempt;
         },
       });
 
@@ -400,6 +482,18 @@ export function createGenerateServer(
           result.error ?? "Generation failed validation.",
           secretsForRedaction
         );
+        try {
+          const logPath = writeFailedStepLog(
+            logDir,
+            trimmedRequest,
+            errMsg,
+            failedAttempts,
+            secretsForRedaction
+          );
+          process.stderr.write(`Saved failed validation log: ${logPath}\n`);
+        } catch {
+          // Never mask the SSE error response if disk logging fails
+        }
         res.write(
           formatSseEvent(
             "error",
