@@ -7,11 +7,16 @@
 
 import type { SceneStep } from "./types.ts";
 import {
+  validateScene,
   validateStep,
   PRIMITIVE_BOUNDS,
   VALID_PRIMITIVES,
   type DimensionBound,
 } from "./sceneValidator.ts";
+import {
+  convertPrimitiveBoundsToViewerUnits,
+  normalizeSceneToViewerUnits,
+} from "./sceneUnits.ts";
 import { REAL_TONES } from "./three-scene.ts";
 
 /**
@@ -455,6 +460,7 @@ export async function generateScene(
 ): Promise<GenerateSceneResult> {
   const maxRetries = options.maxRetriesPerStep ?? DEFAULT_MAX_RETRIES_PER_STEP;
   const primitiveTable = options.primitiveTable ?? PRIMITIVE_BOUNDS;
+  const validationBounds = convertPrimitiveBoundsToViewerUnits(primitiveTable);
   const paletteNames = options.paletteNames ?? ALLOWED_PALETTE_NAMES;
   const schema = options.schema ?? {};
 
@@ -462,18 +468,30 @@ export async function generateScene(
   const retriesLogged: LoggedRetry[] = [];
   const seenPartIds = new Set<string>();
 
+  // Model input is in millimeters (matching the schema and prompt);
+  // divide once by MM_PER_VIEWER_UNIT (10) so validated and emitted steps are in viewer units (cm).
+  const normalizeParsedStep = (rawStep: SceneStep): SceneStep =>
+    normalizeSceneToViewerUnits({
+      schemaVersion: 1,
+      steps: [rawStep],
+    }).steps[0];
+
   const initialPrompt = buildPrompt(request, schema, primitiveTable, paletteNames);
   const stream = client.generateStream(initialPrompt);
 
   for await (const item of parseStreamedSteps(stream)) {
-    let stepToValidate = item.step;
+    let stepToValidate = item.step ? normalizeParsedStep(item.step) : undefined;
     let isValid = false;
     let validationErrors: string[] = [];
 
     if (item.error) {
       validationErrors = [item.error];
     } else if (stepToValidate) {
-      validationErrors = validateStep(stepToValidate, { seenPartIds });
+      validationErrors = validateStep(stepToValidate, {
+        seenPartIds,
+        primitiveTable: validationBounds,
+        unitLabel: "cm",
+      });
       if (validationErrors.length === 0) {
         isValid = true;
         validSteps.push(stepToValidate);
@@ -519,7 +537,7 @@ export async function generateScene(
           if (retryItem.error) {
             retryError = retryItem.error;
           } else if (retryItem.step) {
-            retriedStep = retryItem.step;
+            retriedStep = normalizeParsedStep(retryItem.step);
             break;
           }
         }
@@ -529,7 +547,11 @@ export async function generateScene(
           options.onStep?.(undefined, "invalid", validationErrors);
         } else if (retriedStep) {
           stepToValidate = retriedStep;
-          validationErrors = validateStep(retriedStep, { seenPartIds });
+          validationErrors = validateStep(retriedStep, {
+            seenPartIds,
+            primitiveTable: validationBounds,
+            unitLabel: "cm",
+          });
           if (validationErrors.length === 0) {
             resolved = true;
             validSteps.push(retriedStep);
@@ -554,6 +576,21 @@ export async function generateScene(
           retriesLogged,
         };
       }
+    }
+  }
+
+  if (validSteps.length > 0) {
+    const sceneErrors = validateScene(
+      { schemaVersion: 1, steps: validSteps },
+      { primitiveTable: validationBounds, unitLabel: "cm" }
+    );
+    if (sceneErrors.length > 0) {
+      return {
+        success: false,
+        steps: validSteps,
+        error: sceneErrors.join("; "),
+        retriesLogged,
+      };
     }
   }
 

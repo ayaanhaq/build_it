@@ -7,6 +7,13 @@ import {
   ALLOWED_PALETTE_NAMES,
 } from '../src/generatePipeline.ts';
 import { PRIMITIVE_BOUNDS } from '../src/sceneValidator.ts';
+import {
+  MM_PER_VIEWER_UNIT,
+  normalizeSceneToViewerUnits,
+  VIEWER_PRIMITIVE_BOUNDS,
+} from '../src/sceneUnits.ts';
+import { sceneStepToBuildStep } from '../src/builds.ts';
+import { DESK_SCENE } from '../src/fixtures/desk.scene.ts';
 
 const testResults = {
   buildPrompt: {},
@@ -27,6 +34,13 @@ const testResults = {
   missingClosingBraceAtCapAndEof: {},
   malformedObjectPreservesLaterPrettyObjects: {},
   fencedPrettyPrintedStream: {},
+  normalizeBackPanelAndDistance: {},
+  scaleTogetherAndPreserveAnglesQty: {},
+  normalizeDoesNotMutateInput: {},
+  endToEndMmNormalizesAndValidates: {},
+  unitLabelsCmForGeneratedDeskUnchanged: {},
+  backPanel1800MmBecomes180Not18: {},
+  promptDoesNotAskForCentimeters: {},
   passed: true,
 };
 
@@ -66,6 +80,10 @@ async function runTests() {
     prompt.includes(p)
   );
   const containsBounds = prompt.includes('5000') && prompt.includes('2500');
+  const staysMillimeters =
+    prompt.includes('MILLIMETERS') &&
+    !/centimeters?/i.test(prompt) &&
+    !/\bcm\b/i.test(prompt);
   const containsPalettes = ['tan', 'ink', 'sun', 'brown'].every((c) => prompt.includes(c));
 
   testResults.buildPrompt = {
@@ -73,8 +91,15 @@ async function runTests() {
     containsSchema,
     containsPrimitives,
     containsBounds,
+    staysMillimeters,
     containsPalettes,
-    valid: containsRequest && containsSchema && containsPrimitives && containsBounds && containsPalettes,
+    valid:
+      containsRequest &&
+      containsSchema &&
+      containsPrimitives &&
+      containsBounds &&
+      staysMillimeters &&
+      containsPalettes,
   };
   if (!testResults.buildPrompt.valid) testResults.passed = false;
 
@@ -572,6 +597,295 @@ async function runTests() {
     valid: resFencedPretty.success === true && resFencedPretty.steps.length === 2,
   };
   if (!testResults.fencedPrettyPrintedStream.valid) testResults.passed = false;
+
+  // 19. Back panel 800 x 1800 x 5 mm with cameraPreset.distance 2000 normalizes to 80 x 180 x 0.5 with distance 200
+  const mmBackPanelScene = {
+    schemaVersion: 1,
+    name: 'bookcase-mm',
+    steps: [
+      {
+        stepNumber: 3,
+        title: 'Attach Back Panel',
+        cameraPreset: { distance: 2000, phi: 1.05, theta: 0.72 },
+        parts: [
+          {
+            id: 'back-panel-1',
+            name: 'Bookcase Back Panel',
+            primitive: 'box',
+            dimensions: { width: 800, height: 1800, depth: 5 },
+            position: { x: 0, y: 900, z: -147.5 },
+            rotation: { x: 15, y: -90, z: 0 },
+            color: 'tan',
+            material: 'oak',
+            step: 3,
+            qty: 2,
+          },
+        ],
+      },
+    ],
+  };
+  const mmSnapshotBefore = JSON.stringify(mmBackPanelScene);
+  const normalizedBackPanelScene = normalizeSceneToViewerUnits(mmBackPanelScene);
+  const normStep = normalizedBackPanelScene.steps[0];
+  const normPart = normStep.parts[0];
+
+  testResults.normalizeBackPanelAndDistance = {
+    factor: MM_PER_VIEWER_UNIT,
+    dimensions: { ...normPart.dimensions },
+    distance: normStep.cameraPreset?.distance,
+    valid:
+      MM_PER_VIEWER_UNIT === 10 &&
+      normPart.dimensions.width === 80 &&
+      normPart.dimensions.height === 180 &&
+      normPart.dimensions.depth === 0.5 &&
+      normStep.cameraPreset?.distance === 200,
+  };
+  if (!testResults.normalizeBackPanelAndDistance.valid) testResults.passed = false;
+
+  // 20. Position and dimension values scale together; phi, theta, qty, rotation, and segment counts unchanged
+  const multiGeomScene = {
+    schemaVersion: 1,
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Multi-Primitive Step',
+        cameraPreset: { distance: 1250, phi: 1.12, theta: 0.48 },
+        parts: [
+          {
+            id: 'dowels-1',
+            name: 'Support Rod',
+            primitive: 'cylinder',
+            dimensions: { radius: 12, height: 350, radialSegments: 24 },
+            position: { x: -200, y: 175, z: 120 },
+            rotation: { x: 0, y: 45, z: 90 },
+            color: 'sun',
+            material: 'brass',
+            step: 1,
+            qty: 4,
+          },
+        ],
+      },
+    ],
+  };
+  const normMulti = normalizeSceneToViewerUnits(multiGeomScene);
+  const multiStep = normMulti.steps[0];
+  const multiPart = multiStep.parts[0];
+
+  testResults.scaleTogetherAndPreserveAnglesQty = {
+    position: multiPart.position,
+    dimensions: multiPart.dimensions,
+    phi: multiStep.cameraPreset?.phi,
+    theta: multiStep.cameraPreset?.theta,
+    rotation: multiPart.rotation,
+    qty: multiPart.qty,
+    valid:
+      normPart.position.x === 0 &&
+      normPart.position.y === 90 &&
+      normPart.position.z === -14.75 &&
+      normStep.cameraPreset?.phi === 1.05 &&
+      normStep.cameraPreset?.theta === 0.72 &&
+      normPart.rotation.x === 15 &&
+      normPart.rotation.y === -90 &&
+      normPart.rotation.z === 0 &&
+      normPart.qty === 2 &&
+      multiPart.dimensions.radius === 1.2 &&
+      multiPart.dimensions.height === 35 &&
+      multiPart.dimensions.radialSegments === 24 &&
+      multiPart.position.x === -20 &&
+      multiPart.position.y === 17.5 &&
+      multiPart.position.z === 12 &&
+      multiPart.rotation.y === 45 &&
+      multiPart.rotation.z === 90 &&
+      multiPart.qty === 4 &&
+      multiStep.cameraPreset?.distance === 125 &&
+      multiStep.cameraPreset?.phi === 1.12 &&
+      multiStep.cameraPreset?.theta === 0.48,
+  };
+  if (!testResults.scaleTogetherAndPreserveAnglesQty.valid) testResults.passed = false;
+
+  // 21. normalizeSceneToViewerUnits does not mutate its input
+  normPart.dimensions.width = 9999;
+  normPart.position.y = 9999;
+  normPart.rotation.y = 9999;
+  if (normStep.cameraPreset) normStep.cameraPreset.distance = 9999;
+
+  testResults.normalizeDoesNotMutateInput = {
+    notSameRef: normalizedBackPanelScene !== mmBackPanelScene,
+    inputUnchanged: JSON.stringify(mmBackPanelScene) === mmSnapshotBefore,
+    valid:
+      normalizedBackPanelScene !== mmBackPanelScene &&
+      JSON.stringify(mmBackPanelScene) === mmSnapshotBefore &&
+      mmBackPanelScene.steps[0].parts[0].dimensions.width === 800 &&
+      mmBackPanelScene.steps[0].cameraPreset.distance === 2000,
+  };
+  if (!testResults.normalizeDoesNotMutateInput.valid) testResults.passed = false;
+
+  // 22. End-to-end generateScene run with FakeModelClient returning mm output validates normalized numbers
+  const bookcaseStep1 = {
+    stepNumber: 1,
+    title: 'Stand Side Uprights',
+    cameraPreset: { distance: 1800, phi: 1.1, theta: 0.6 },
+    parts: [
+      {
+        id: 'upright-left',
+        name: 'Left Upright',
+        primitive: 'box',
+        dimensions: { width: 25, height: 1800, depth: 300 },
+        position: { x: -387.5, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+      {
+        id: 'upright-right',
+        name: 'Right Upright',
+        primitive: 'box',
+        dimensions: { width: 25, height: 1800, depth: 300 },
+        position: { x: 387.5, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+    ],
+  };
+  const bookcaseStep2 = {
+    stepNumber: 2,
+    title: 'Install Horizontal Shelves',
+    cameraPreset: { distance: 1900, phi: 1.0, theta: 0.7 },
+    parts: [
+      {
+        id: 'shelf-bottom',
+        name: 'Bottom Shelf',
+        primitive: 'box',
+        dimensions: { width: 750, height: 25, depth: 295 },
+        position: { x: 0, y: 50, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const bookcaseStep3 = {
+    stepNumber: 3,
+    title: 'Attach Back Panel',
+    cameraPreset: { distance: 2000, phi: 1.05, theta: 0.55 },
+    parts: [
+      {
+        id: 'back-panel',
+        name: 'Back Panel',
+        primitive: 'box',
+        dimensions: { width: 800, height: 1800, depth: 5 },
+        position: { x: 0, y: 900, z: -147.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'cream',
+        material: 'plywood',
+        step: 3,
+        qty: 1,
+      },
+    ],
+  };
+
+  const e2eClient = new FakeModelClient([
+    [
+      JSON.stringify(bookcaseStep1) + '\n',
+      JSON.stringify(bookcaseStep2) + '\n',
+      JSON.stringify(bookcaseStep3) + '\n',
+    ],
+  ]);
+  const streamedValidSteps = [];
+  const resE2E = await generateScene('build a 4-shelf bookcase', e2eClient, {
+    onStep: (step, status) => {
+      if (status === 'valid' && step) streamedValidSteps.push(step);
+    },
+  });
+  const e2eBackPanel = resE2E.steps[2]?.parts?.[0];
+  const e2eStep3 = resE2E.steps[2];
+
+  testResults.endToEndMmNormalizesAndValidates = {
+    success: resE2E.success,
+    stepCount: resE2E.steps.length,
+    boxMaxCm: VIEWER_PRIMITIVE_BOUNDS.box.width.max,
+    step3Dimensions: e2eBackPanel?.dimensions,
+    step3Position: e2eBackPanel?.position,
+    step3CameraPreset: e2eStep3?.cameraPreset,
+    streamedBackPanelWidth: streamedValidSteps[2]?.parts?.[0]?.dimensions?.width,
+    valid:
+      resE2E.success === true &&
+      resE2E.steps.length === 3 &&
+      VIEWER_PRIMITIVE_BOUNDS.box.width.max === 500 &&
+      e2eBackPanel?.dimensions.width === 80 &&
+      e2eBackPanel?.dimensions.height === 180 &&
+      e2eBackPanel?.dimensions.depth === 0.5 &&
+      e2eBackPanel?.position.x === 0 &&
+      e2eBackPanel?.position.y === 90 &&
+      e2eBackPanel?.position.z === -14.75 &&
+      e2eStep3?.cameraPreset?.distance === 200 &&
+      e2eStep3?.cameraPreset?.phi === 1.05 &&
+      e2eStep3?.cameraPreset?.theta === 0.55 &&
+      streamedValidSteps[2]?.parts?.[0]?.dimensions?.width === 80,
+  };
+  if (!testResults.endToEndMmNormalizesAndValidates.valid) testResults.passed = false;
+
+  // 23. Unit labels show "cm" for generated scenes while keeping "mm" for hand-built DESK_SCENE
+  const generatedBuildStep = sceneStepToBuildStep(resE2E.steps[2]);
+  const deskBuildStep = sceneStepToBuildStep(DESK_SCENE.steps[0]);
+
+  testResults.unitLabelsCmForGeneratedDeskUnchanged = {
+    generatedDimText: generatedBuildStep.parts[0]?.dimensions,
+    deskDimText: deskBuildStep.parts[0]?.dimensions,
+    valid:
+      generatedBuildStep.parts[0]?.dimensions === '80 × 180 × 0.5 cm' &&
+      deskBuildStep.parts[0]?.dimensions.endsWith(' mm'),
+  };
+  if (!testResults.unitLabelsCmForGeneratedDeskUnchanged.valid) testResults.passed = false;
+
+  // 24. Regression: 1800 mm back panel normalizes once to 180 (not 18) end-to-end
+  const regressionClient = new FakeModelClient([[JSON.stringify(mmBackPanelScene.steps[0]) + '\n']]);
+  const resRegression = await generateScene('build a 4-shelf bookcase', regressionClient);
+  const regPart = resRegression.steps[0]?.parts?.[0];
+  const regDistance = resRegression.steps[0]?.cameraPreset?.distance;
+  testResults.backPanel1800MmBecomes180Not18 = {
+    success: resRegression.success,
+    height: regPart?.dimensions?.height,
+    width: regPart?.dimensions?.width,
+    depth: regPart?.dimensions?.depth,
+    distance: regDistance,
+    valid:
+      resRegression.success === true &&
+      regPart?.dimensions?.height === 180 &&
+      regPart?.dimensions?.height !== 18 &&
+      regPart?.dimensions?.width === 80 &&
+      regPart?.dimensions?.depth === 0.5 &&
+      regDistance === 200 &&
+      regDistance !== 20,
+  };
+  if (!testResults.backPanel1800MmBecomes180Not18.valid) testResults.passed = false;
+
+  // 25. Regression: buildPrompt does not contain "centimeters" or "cm" in its dimension instructions
+  const recordedPrompt = regressionClient.recordedPrompts[0] ?? '';
+  const dimSectionStart = recordedPrompt.indexOf('=== DIMENSION');
+  const dimSectionEnd = recordedPrompt.indexOf('=== ALLOWED PALETTE', dimSectionStart);
+  const dimInstructions =
+    dimSectionStart >= 0 && dimSectionEnd > dimSectionStart
+      ? recordedPrompt.slice(dimSectionStart, dimSectionEnd)
+      : recordedPrompt;
+
+  testResults.promptDoesNotAskForCentimeters = {
+    hasDimensionBoundsHeader: dimInstructions.includes('=== DIMENSION BOUNDS (MILLIMETERS & CONSTRAINTS) ==='),
+    hasCentimetersWord: /centimeters?/i.test(dimInstructions),
+    hasCmToken: /\bcm\b/i.test(dimInstructions),
+    valid:
+      dimInstructions.includes('=== DIMENSION BOUNDS (MILLIMETERS & CONSTRAINTS) ===') &&
+      !/centimeters?/i.test(dimInstructions) &&
+      !/\bcm\b/i.test(dimInstructions),
+  };
+  if (!testResults.promptDoesNotAskForCentimeters.valid) testResults.passed = false;
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }

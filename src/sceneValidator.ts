@@ -114,7 +114,9 @@ export function isFiniteNumber(val: unknown): val is number {
 export function validatePartDimensions(
   part: ScenePart,
   partRef: string,
-  errors: string[]
+  errors: string[],
+  boundsTable: Record<string, Record<string, DimensionBound>> = PRIMITIVE_BOUNDS,
+  unitLabel: string = "mm"
 ): void {
   const primitive = part.primitive;
   const dims = part.dimensions && typeof part.dimensions === "object" ? part.dimensions : null;
@@ -124,7 +126,7 @@ export function validatePartDimensions(
     return;
   }
 
-  const bounds = PRIMITIVE_BOUNDS[primitive];
+  const bounds = boundsTable[primitive] ?? PRIMITIVE_BOUNDS[primitive];
 
   if (primitive === "box" || primitive === "bevel") {
     for (const requiredKey of ["width", "height", "depth"] as const) {
@@ -137,7 +139,7 @@ export function validatePartDimensions(
         const bound = bounds[requiredKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${requiredKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive '${primitive}'.`
+            `${partRef}: dimension '${requiredKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive '${primitive}'.`
           );
         }
       }
@@ -153,7 +155,7 @@ export function validatePartDimensions(
             const bound = bounds[optionalKey];
             if (bound && (val < bound.min || val > bound.max)) {
               errors.push(
-                `${partRef}: dimension '${optionalKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive '${primitive}'.`
+                `${partRef}: dimension '${optionalKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive '${primitive}'.`
               );
             }
           }
@@ -170,7 +172,7 @@ export function validatePartDimensions(
       const bound = bounds.height;
       if (height < bound.min || height > bound.max) {
         errors.push(
-          `${partRef}: dimension 'height' (${height} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'cylinder'.`
+          `${partRef}: dimension 'height' (${height} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'cylinder'.`
         );
       }
     }
@@ -193,7 +195,7 @@ export function validatePartDimensions(
           const bound = bounds[rKey];
           if (bound && (val < bound.min || val > bound.max)) {
             errors.push(
-              `${partRef}: dimension '${rKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'cylinder'.`
+              `${partRef}: dimension '${rKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'cylinder'.`
             );
           }
         }
@@ -224,7 +226,7 @@ export function validatePartDimensions(
         const bound = bounds[reqKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${reqKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'lathe'.`
+            `${partRef}: dimension '${reqKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'lathe'.`
           );
         }
       }
@@ -253,7 +255,7 @@ export function validatePartDimensions(
         const bound = bounds[reqKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${reqKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'spring'.`
+            `${partRef}: dimension '${reqKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'spring'.`
           );
         }
       }
@@ -279,7 +281,7 @@ export function validatePartDimensions(
         const bound = bounds.wireRadius;
         if (wire < bound.min || wire > bound.max) {
           errors.push(
-            `${partRef}: dimension 'wireRadius' (${wire} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'spring'.`
+            `${partRef}: dimension 'wireRadius' (${wire} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'spring'.`
           );
         }
       }
@@ -336,6 +338,14 @@ export interface StepValidationContext {
    * Callback invoked with the estimated vertex count for this step.
    */
   onStepVertices?: (vertices: number) => void;
+  /**
+   * Optional primitive bounds table (defaults to PRIMITIVE_BOUNDS in mm).
+   */
+  primitiveTable?: Record<string, Record<string, DimensionBound>>;
+  /**
+   * Optional unit label shown in dimension bounds errors (defaults to "mm").
+   */
+  unitLabel?: string;
 }
 
 /**
@@ -441,7 +451,13 @@ export function validateStep(
     stepVertices += partVerts;
 
     // Validate bounds and non-finite dimensions
-    validatePartDimensions(part as ScenePart, partRef, errors);
+    validatePartDimensions(
+      part as ScenePart,
+      partRef,
+      errors,
+      context.primitiveTable ?? PRIMITIVE_BOUNDS,
+      context.unitLabel ?? "mm"
+    );
 
     // Validate position and rotation vectors
     validatePartVectors(part as ScenePart, partRef, errors);
@@ -469,14 +485,23 @@ export function validateStep(
   return errors;
 }
 
+export interface ValidateSceneOptions {
+  primitiveTable?: Record<string, Record<string, DimensionBound>>;
+  unitLabel?: string;
+}
+
 /**
  * Validate a candidate 3D scene against all structural, topological, and safety rules.
  * Implemented on top of validateStep to eliminate rule duplication.
  *
  * @param data Unknown candidate scene input
+ * @param options Optional bounds table and unit label overrides
  * @returns Array of diagnostic error strings. An empty array indicates a valid scene.
  */
-export function validateScene(data: unknown): string[] {
+export function validateScene(
+  data: unknown,
+  options: ValidateSceneOptions = {}
+): string[] {
   const errors: string[] = [];
 
   if (!data || typeof data !== "object") {
@@ -544,6 +569,8 @@ export function validateScene(data: unknown): string[] {
     const stepErrors = validateStep(step, {
       seenPartIds,
       validStepNumbers,
+      primitiveTable: options.primitiveTable,
+      unitLabel: options.unitLabel,
       onStepVertices: (stepVerts) => {
         estimatedTotalVertices += stepVerts;
       },
