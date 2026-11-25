@@ -260,6 +260,18 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertTrue(res["retryUsedResponseFormat"])
         self.assertTrue(res["valid"])
 
+    def test_completeness_check_suite(self):
+        res = self.data["completenessCheckSuite"]
+        self.assertGreater(res["incompleteDirectErrorCount"], 0)
+        self.assertEqual(res["completeDirectErrorCount"], 0)
+        self.assertEqual(res["deskDirectErrorCount"], 0)
+        self.assertTrue(res["retriedSuccess"])
+        self.assertEqual(res["retriedStepCount"], 3)
+        self.assertEqual(res["retriedCount"], 1)
+        self.assertFalse(res["unfixedSuccess"])
+        self.assertIn("back panel", res["unfixedError"].lower())
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ import type { SceneStep } from "./types.ts";
 import {
   validateScene,
   validateStep,
+  checkSceneCompleteness,
   PRIMITIVE_BOUNDS,
   VALID_PRIMITIVES,
   type DimensionBound,
@@ -130,6 +131,8 @@ export function buildPrompt(
     "",
     "=== OUTPUT FORMAT ===",
     "Output each step as a single newline-delimited JSON line conforming to the SceneStep schema.",
+    "In step 1's description, name all major structural part groups that the complete assembly will include (e.g., side panels, top panel, bottom panel, shelves, back panel, legs, rails, or drawers as appropriate).",
+    "Emit sequential steps covering every planned part group and closing any enclosure panels before ending the stream.",
     "Do not wrap lines in markdown code blocks.",
   ].join("\n");
 }
@@ -579,6 +582,62 @@ export function buildRetryPrompt(input: RetryPromptInput): string {
   return lines.join("\n");
 }
 
+export interface ContinuationPromptInput {
+  originalRequest: string;
+  nextStepNumber: number;
+  missingErrors: string[];
+  previousSteps: SceneStep[];
+  schema?: unknown;
+}
+
+/**
+ * Builds a continuation prompt asking the model to emit the missing steps
+ * needed to complete all planned part groups and structural closures.
+ */
+export function buildContinuationPrompt(input: ContinuationPromptInput): string {
+  const errorsFormatted = input.missingErrors.map((e) => `  - ${e}`).join("\n");
+  const usedIds: string[] = [];
+  const stepSummaries = input.previousSteps.map((prev) => {
+    const partNames = Array.isArray(prev.parts)
+      ? prev.parts.map((p) => {
+          if (p && typeof p.id === "string" && !usedIds.includes(p.id)) {
+            usedIds.push(p.id);
+          }
+          return p?.name || p?.id || "unnamed";
+        })
+      : [];
+    return `  - Step ${prev.stepNumber} (${prev.title}): ${partNames.join(", ")}`;
+  });
+
+  const lines = [
+    "The generated 3D build stopped early and is incomplete:",
+    errorsFormatted,
+    "",
+    `Original Request: ${input.originalRequest}`,
+    "Steps already generated:",
+    ...(stepSummaries.length > 0 ? stepSummaries : ["  - (none)"]),
+    `Part IDs already used in earlier steps (do NOT reuse these): ${
+      usedIds.length > 0 ? usedIds.join(", ") : "(none)"
+    }`,
+  ];
+
+  if (input.schema && Object.keys(input.schema as object).length > 0) {
+    lines.push("", "=== TARGET SCHEMA ===", JSON.stringify(input.schema, null, 2));
+  }
+
+  lines.push(
+    "",
+    "=== EXAMPLE VALID STEP OBJECT ===",
+    JSON.stringify(CONCRETE_STEP_EXAMPLE, null, 2),
+    "",
+    `Continue from step ${input.nextStepNumber} and emit newline-delimited JSON SceneStep objects for the remaining missing components needed to finish the build.`,
+    "All dimensions and positions must remain in MILLIMETERS.",
+    "Do not wrap lines in markdown code blocks."
+  );
+
+  return lines.join("\n");
+}
+
 export interface GenerateSceneOptions {
   maxRetriesPerStep?: number;
   schema?: unknown;
@@ -634,13 +693,17 @@ export async function generateScene(
   const initialPrompt = buildPrompt(request, schema, primitiveTable, paletteNames);
   let initialMaxTokens = DEFAULT_INITIAL_MAX_TOKENS;
 
-  for (let streamAttempt = 0; streamAttempt <= maxRetries; streamAttempt++) {
-    let hitIncompleteStream = false;
-    let incompleteReason = "incomplete_output: Model stream ended mid-object.";
-
+  const consumeStream = async (
+    promptText: string,
+    maxTokensForStream: number
+  ): Promise<
+    | { status: "ok" }
+    | { status: "incomplete_stream"; reason: string }
+    | { status: "failed"; result: GenerateSceneResult }
+  > => {
     try {
-      const stream = client.generateStream(initialPrompt, {
-        maxTokens: initialMaxTokens,
+      const stream = client.generateStream(promptText, {
+        maxTokens: maxTokensForStream,
       });
 
       for await (const item of parseStreamedSteps(stream)) {
@@ -653,9 +716,7 @@ export async function generateScene(
         }
 
         if (item.error && isUnclosedJsonErrorMessage(item.error)) {
-          hitIncompleteStream = true;
-          incompleteReason = item.error;
-          break;
+          return { status: "incomplete_stream", reason: item.error };
         }
 
         let stepToValidate = item.step
@@ -685,7 +746,7 @@ export async function generateScene(
 
           let attempt = 0;
           let resolved = false;
-          let stepRetryMaxTokens = initialMaxTokens;
+          let stepRetryMaxTokens = maxTokensForStream;
           const targetStepNum =
             stepToValidate && typeof stepToValidate.stepNumber === "number"
               ? stepToValidate.stepNumber
@@ -804,36 +865,47 @@ export async function generateScene(
 
           if (!resolved) {
             return {
-              success: false,
-              steps: validSteps,
-              error: `Step ${targetStepNum} failed validation after ${maxRetries} retries: ${validationErrors.join("; ")}`,
-              retriesLogged,
+              status: "failed",
+              result: {
+                success: false,
+                steps: validSteps,
+                error: `Step ${targetStepNum} failed validation after ${maxRetries} retries: ${validationErrors.join("; ")}`,
+                retriesLogged,
+              },
             };
           }
         }
       }
+      return { status: "ok" };
     } catch (streamErr: unknown) {
       if (isIncompleteOutputError(streamErr)) {
-        hitIncompleteStream = true;
-        incompleteReason =
-          streamErr instanceof Error ? streamErr.message : "incomplete_output";
-      } else {
-        throw streamErr;
+        return {
+          status: "incomplete_stream",
+          reason:
+            streamErr instanceof Error ? streamErr.message : "incomplete_output",
+        };
       }
+      throw streamErr;
     }
+  };
 
-    if (!hitIncompleteStream) {
+  for (let streamAttempt = 0; streamAttempt <= maxRetries; streamAttempt++) {
+    const outcome = await consumeStream(initialPrompt, initialMaxTokens);
+    if (outcome.status === "failed") {
+      return outcome.result;
+    }
+    if (outcome.status === "ok") {
       break;
     }
 
     const nextStepNum = validSteps.length + 1;
-    options.onStep?.(undefined, "invalid", [incompleteReason]);
+    options.onStep?.(undefined, "invalid", [outcome.reason]);
 
     if (streamAttempt >= maxRetries) {
       return {
         success: false,
         steps: validSteps,
-        error: `Step ${nextStepNum} failed with incomplete_output after ${maxRetries} retries: ${incompleteReason}`,
+        error: `Step ${nextStepNum} failed with incomplete_output after ${maxRetries} retries: ${outcome.reason}`,
         retriesLogged,
       };
     }
@@ -842,10 +914,43 @@ export async function generateScene(
     retriesLogged.push({
       stepNumber: nextStepNum,
       attempt: streamAttempt + 1,
-      errors: [incompleteReason],
+      errors: [outcome.reason],
       retryPrompt: initialPrompt,
     });
-    options.onRetry?.(nextStepNum, streamAttempt + 1, [incompleteReason], initialPrompt);
+    options.onRetry?.(nextStepNum, streamAttempt + 1, [outcome.reason], initialPrompt);
+  }
+
+  // Retry missing steps if Step 1's plan or structural enclosure check reports missing components
+  for (let contAttempt = 1; contAttempt <= maxRetries && validSteps.length > 0; contAttempt++) {
+    const completenessErrors = checkSceneCompleteness({ steps: validSteps });
+    if (completenessErrors.length === 0) {
+      break;
+    }
+
+    const nextStepNum = validSteps.length + 1;
+    const continuationPrompt = buildContinuationPrompt({
+      originalRequest: request,
+      nextStepNumber: nextStepNum,
+      missingErrors: completenessErrors,
+      previousSteps: validSteps,
+      schema,
+    });
+
+    retriesLogged.push({
+      stepNumber: nextStepNum,
+      attempt: contAttempt,
+      errors: [...completenessErrors],
+      retryPrompt: continuationPrompt,
+    });
+    options.onRetry?.(nextStepNum, contAttempt, completenessErrors, continuationPrompt);
+
+    const contOutcome = await consumeStream(continuationPrompt, initialMaxTokens);
+    if (contOutcome.status === "failed") {
+      return contOutcome.result;
+    }
+    if (contOutcome.status === "incomplete_stream") {
+      initialMaxTokens = Math.min(MAX_COMPLETION_TOKENS_CAP, initialMaxTokens * 2);
+    }
   }
 
   if (validSteps.length > 0) {

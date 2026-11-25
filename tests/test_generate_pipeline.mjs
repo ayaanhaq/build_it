@@ -8,7 +8,7 @@ import {
   DEFAULT_INITIAL_MAX_TOKENS,
   ALLOWED_PALETTE_NAMES,
 } from '../src/generatePipeline.ts';
-import { PRIMITIVE_BOUNDS } from '../src/sceneValidator.ts';
+import { PRIMITIVE_BOUNDS, checkSceneCompleteness } from '../src/sceneValidator.ts';
 import {
   MM_PER_VIEWER_UNIT,
   normalizeSceneToViewerUnits,
@@ -50,6 +50,7 @@ const testResults = {
   retryPromptHasStep2AndUsedPartIds: {},
   incompleteOutputRetriesWithSameRequestAndHigherTokens: {},
   retryMissingShapeRejectedBeforeValidator: {},
+  completenessCheckSuite: {},
   passed: true,
 };
 
@@ -1274,6 +1275,168 @@ async function runTests() {
       Boolean(shapeRetryClient.recordedOptions[1]?.responseFormat),
   };
   if (!testResults.retryMissingShapeRejectedBeforeValidator.valid) {
+    testResults.passed = false;
+  }
+
+  // 33. Scene completeness check: missing back panel triggers continuation retry & fails if unfixed; complete scene & desk pass
+  const compStep1 = {
+    stepNumber: 1,
+    title: 'Side Panels',
+    description:
+      'Build the side panels, top panel, bottom panel, shelves, and back panel.',
+    parts: [
+      {
+        id: 'c_side_left',
+        name: 'Left Side Panel',
+        primitive: 'box',
+        dimensions: { width: 18, height: 1800, depth: 300 },
+        position: { x: -391, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+      {
+        id: 'c_side_right',
+        name: 'Right Side Panel',
+        primitive: 'box',
+        dimensions: { width: 18, height: 1800, depth: 300 },
+        position: { x: 391, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+    ],
+  };
+  const compStep2 = {
+    stepNumber: 2,
+    title: 'Add Top, Bottom, and Shelves',
+    parts: [
+      {
+        id: 'c_bottom_panel',
+        name: 'Bottom Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 9, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_top_panel',
+        name: 'Top Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 1791, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_shelf_1',
+        name: 'Shelf 1',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 600, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_shelf_2',
+        name: 'Shelf 2',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 1200, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const compStep3 = {
+    stepNumber: 3,
+    title: 'Attach Back Panel',
+    parts: [
+      {
+        id: 'c_back_panel',
+        name: 'Back Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 1764, depth: 5 },
+        position: { x: 0, y: 900, z: -147.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'brown',
+        material: 'plywood',
+        step: 3,
+        qty: 1,
+      },
+    ],
+  };
+
+  // Case A: Incomplete without back panel triggers continuation retry and succeeds once step 3 arrives
+  const retryToCompleteClient = new FakeModelClient([
+    [JSON.stringify(compStep1) + '\n', JSON.stringify(compStep2) + '\n'],
+    [JSON.stringify(compStep3) + '\n'],
+  ]);
+  const resCompletedAfterRetry = await generateScene(
+    'build a shelving unit',
+    retryToCompleteClient
+  );
+
+  // Case B: Still missing back panel after retries fails cleanly
+  const alwaysIncompleteClient = new FakeModelClient([
+    [JSON.stringify(compStep1) + '\n', JSON.stringify(compStep2) + '\n'],
+    [],
+  ]);
+  const resMissingBackPanel = await generateScene(
+    'build a shelving unit',
+    alwaysIncompleteClient,
+    { maxRetriesPerStep: 1 }
+  );
+
+  // Case C: Complete scene & desk fixture pass checkSceneCompleteness cleanly
+  const incompleteDirectErrors = checkSceneCompleteness({
+    steps: [compStep1, compStep2],
+  });
+  const completeDirectErrors = checkSceneCompleteness({
+    steps: [compStep1, compStep2, compStep3],
+  });
+  const deskDirectErrors = checkSceneCompleteness({
+    steps: DESK_SCENE.steps,
+  });
+
+  testResults.completenessCheckSuite = {
+    incompleteDirectErrorCount: incompleteDirectErrors.length,
+    completeDirectErrorCount: completeDirectErrors.length,
+    deskDirectErrorCount: deskDirectErrors.length,
+    retriedSuccess: resCompletedAfterRetry.success,
+    retriedStepCount: resCompletedAfterRetry.steps.length,
+    retriedCount: resCompletedAfterRetry.retriesLogged.length,
+    unfixedSuccess: resMissingBackPanel.success,
+    unfixedError: resMissingBackPanel.error ?? '',
+    valid:
+      incompleteDirectErrors.length > 0 &&
+      completeDirectErrors.length === 0 &&
+      deskDirectErrors.length === 0 &&
+      resCompletedAfterRetry.success === true &&
+      resCompletedAfterRetry.steps.length === 3 &&
+      resCompletedAfterRetry.retriesLogged.length === 1 &&
+      resMissingBackPanel.success === false &&
+      typeof resMissingBackPanel.error === 'string' &&
+      resMissingBackPanel.error.toLowerCase().includes('back panel'),
+  };
+  if (!testResults.completenessCheckSuite.valid) {
     testResults.passed = false;
   }
 
