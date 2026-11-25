@@ -160,6 +160,118 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertEqual(res["stepCount"], 2)
         self.assertTrue(res["valid"])
 
+    def test_normalize_back_panel_and_camera_distance(self):
+        res = self.data["normalizeBackPanelAndDistance"]
+        self.assertEqual(res["factor"], 10)
+        self.assertEqual(res["dimensions"], {"width": 80, "height": 180, "depth": 0.5})
+        self.assertEqual(res["distance"], 288)
+        self.assertTrue(res["valid"])
+
+    def test_position_and_dimensions_scale_together_preserving_angles_and_qty(self):
+        self.assertTrue(self.data["scaleTogetherAndPreserveAnglesQty"]["valid"])
+
+    def test_normalize_does_not_mutate_input(self):
+        res = self.data["normalizeDoesNotMutateInput"]
+        self.assertTrue(res["notSameRef"])
+        self.assertTrue(res["inputUnchanged"])
+        self.assertTrue(res["valid"])
+
+    def test_end_to_end_mm_stream_normalizes_and_validates(self):
+        res = self.data["endToEndMmNormalizesAndValidates"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 3)
+        self.assertEqual(res["boxMaxCm"], 500)
+        self.assertEqual(res["step3Dimensions"], {"width": 80, "height": 180, "depth": 0.5})
+        self.assertEqual(res["step3CameraPreset"]["distance"], 288)
+        self.assertTrue(res["valid"])
+
+    def test_unit_labels_cm_for_generated_and_desk_kept(self):
+        res = self.data["unitLabelsCmForGeneratedDeskUnchanged"]
+        self.assertEqual(res["generatedDimText"], "80 × 180 × 0.5 cm")
+        self.assertTrue(res["deskDimText"].endswith(" mm"))
+        self.assertTrue(res["valid"])
+
+    def test_back_panel_1800mm_normalizes_to_180_not_18(self):
+        res = self.data["backPanel1800MmBecomes180Not18"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["height"], 180)
+        self.assertNotEqual(res["height"], 18)
+        self.assertEqual(res["width"], 80)
+        self.assertEqual(res["depth"], 0.5)
+        self.assertEqual(res["distance"], 288)
+        self.assertTrue(res["valid"])
+
+    def test_build_prompt_does_not_contain_centimeters_or_cm(self):
+        res = self.data["promptDoesNotAskForCentimeters"]
+        self.assertTrue(res["hasDimensionBoundsHeader"])
+        self.assertFalse(res["hasCentimetersWord"])
+        self.assertFalse(res["hasCmToken"])
+        self.assertTrue(res["valid"])
+
+    def test_clamp_distance_low_for_180cm_model(self):
+        res = self.data["clampDistanceLowFor180CmModel"]
+        self.assertEqual(res["step1Distance"], 288)
+        self.assertEqual(res["step2Distance"], 288)
+        self.assertTrue(res["phiPreserved"])
+        self.assertTrue(res["thetaPreserved"])
+        self.assertTrue(res["valid"])
+
+    def test_distance_unchanged_within_bounds_and_capped_at_400(self):
+        res = self.data["distanceUnchangedWhenWithinBounds"]
+        self.assertEqual(res["dist180At300"], 300)
+        self.assertEqual(res["dist100At200"], 200)
+        self.assertEqual(res["distOverMaxClamped"], 400)
+        self.assertTrue(res["valid"])
+
+    def test_missing_camera_preset_sets_defaults_and_distance(self):
+        res = self.data["missingCameraPresetSetsDefaults"]
+        self.assertEqual(res["preset180"], {"distance": 288, "phi": 1.0, "theta": 0.6})
+        self.assertEqual(res["preset100"], {"distance": 160, "phi": 1.0, "theta": 0.6})
+        self.assertTrue(res["valid"])
+
+    def test_desk_fixture_distances_untouched(self):
+        res = self.data["deskFixtureDistancesUntouched"]
+        self.assertEqual(res["deskDistances"], res["expectedDeskDistances"])
+        self.assertTrue(res["valid"])
+
+    def test_retry_prompt_has_step_2_and_used_part_ids(self):
+        res = self.data["retryPromptHasStep2AndUsedPartIds"]
+        self.assertTrue(res["hasStep2"])
+        self.assertTrue(res["hasTitle"])
+        self.assertTrue(res["hasUsedIds"])
+        self.assertTrue(res["hasSchema"])
+        self.assertTrue(res["hasReturnDirective"])
+        self.assertTrue(res["valid"])
+
+    def test_incomplete_output_retries_with_same_request_and_higher_tokens(self):
+        res = self.data["incompleteOutputRetriesWithSameRequestAndHigherTokens"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertTrue(res["samePromptReused"])
+        self.assertEqual(res["secondMaxTokens"], res["firstMaxTokens"] * 2)
+        self.assertTrue(res["valid"])
+
+    def test_retry_missing_shape_rejected_before_validator(self):
+        res = self.data["retryMissingShapeRejectedBeforeValidator"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertEqual(res["retriesCount"], 2)
+        self.assertTrue(res["secondRetrySawShapeError"])
+        self.assertTrue(res["retryUsedResponseFormat"])
+        self.assertTrue(res["valid"])
+
+    def test_completeness_check_suite(self):
+        res = self.data["completenessCheckSuite"]
+        self.assertGreater(res["incompleteDirectErrorCount"], 0)
+        self.assertEqual(res["completeDirectErrorCount"], 0)
+        self.assertEqual(res["deskDirectErrorCount"], 0)
+        self.assertTrue(res["retriedSuccess"])
+        self.assertEqual(res["retriedStepCount"], 3)
+        self.assertEqual(res["retriedCount"], 1)
+        self.assertFalse(res["unfixedSuccess"])
+        self.assertIn("back panel", res["unfixedError"].lower())
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

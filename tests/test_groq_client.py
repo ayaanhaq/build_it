@@ -81,6 +81,27 @@ class GroqClientTests(unittest.TestCase):
     def test_server_and_cli_provider_selection(self):
         self.assertTrue(self.data["serverAndCliProviderSelection"]["valid"])
 
+    def test_mid_object_stream_end_raises_incomplete_output(self):
+        res = self.data["midObjectEndsRaisesIncompleteOutput"]
+        self.assertTrue(res["isGroqClientError"])
+        self.assertEqual(res["code"], "incomplete_output")
+        self.assertTrue(res["valid"])
+
+    def test_finish_reason_length_raises_incomplete_output(self):
+        res = self.data["finishReasonLengthRaisesIncompleteOutput"]
+        self.assertTrue(res["isGroqClientError"])
+        self.assertEqual(res["code"], "incomplete_output")
+        self.assertEqual(res["finishReason"], "length")
+        self.assertEqual(res["metaFinishReason"], "length")
+        self.assertTrue(res["valid"])
+
+    def test_max_tokens_sent_in_body_and_overridable(self):
+        res = self.data["maxTokensSentInBodyAndOverridable"]
+        self.assertGreaterEqual(res["defaultMaxTokens"], 8000)
+        self.assertEqual(res["firstReqMaxTokens"], res["defaultMaxTokens"])
+        self.assertEqual(res["secondReqMaxTokens"], 16384)
+        self.assertTrue(res["valid"])
+
     def test_cli_unknown_provider_subprocess_fails(self):
         env = os.environ.copy()
         env["LLM_PROVIDER"] = "bad_provider"

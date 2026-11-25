@@ -2,6 +2,7 @@ import {
   GroqModelClient,
   GroqClientError,
   DEFAULT_GROQ_MODEL,
+  DEFAULT_GROQ_MAX_TOKENS,
   GROQ_CHAT_COMPLETIONS_URL,
 } from "../src/model/groqClient.ts";
 import { GeminiModelClient } from "../src/model/geminiClient.ts";
@@ -24,6 +25,9 @@ const results = {
   abortOnEarlyStopAndTimeout: {},
   providerSelectionUnit: {},
   serverAndCliProviderSelection: {},
+  midObjectEndsRaisesIncompleteOutput: {},
+  finishReasonLengthRaisesIncompleteOutput: {},
+  maxTokensSentInBodyAndOverridable: {},
   passed: true,
 };
 
@@ -617,6 +621,131 @@ async function runTests() {
       cliMissingKeyCode,
       cliGroqCode,
       cliSeenProvider,
+      valid,
+    };
+    if (!valid) results.passed = false;
+  }
+
+  // 11. Stream ending mid-object raises GroqClientError with code === "incomplete_output"
+  {
+    const fakeFetch = async () =>
+      new Response(
+        makeStream([
+          groqSseChunk('{"stepNumber":1,"title":"Cutoff","parts":[{"id":"side_1"'),
+          "data: [DONE]\n\n",
+        ]),
+        { status: 200 }
+      );
+    const client = new GroqModelClient({
+      apiKey: "gsk_fake_mid_obj",
+      fetch: fakeFetch,
+    });
+
+    let caught = null;
+    try {
+      for await (const _ of client.generateStream("cutoff test")) {
+        // consume stream
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    const valid =
+      caught instanceof GroqClientError &&
+      caught.code === "incomplete_output";
+    results.midObjectEndsRaisesIncompleteOutput = {
+      isGroqClientError: caught instanceof GroqClientError,
+      code: caught?.code,
+      message: caught?.message,
+      valid,
+    };
+    if (!valid) results.passed = false;
+  }
+
+  // 12. finish_reason === "length" raises GroqClientError with code === "incomplete_output"
+  {
+    let seenMeta = null;
+    const fakeFetch = async () =>
+      new Response(
+        makeStream([
+          groqSseChunk('{"stepNumber":1,"title":"Trunc"}'),
+          "data: " +
+            JSON.stringify({
+              choices: [{ index: 0, delta: {}, finish_reason: "length" }],
+            }) +
+            "\n\n",
+          "data: [DONE]\n\n",
+        ]),
+        { status: 200 }
+      );
+    const client = new GroqModelClient({
+      apiKey: "gsk_fake_len",
+      fetch: fakeFetch,
+    });
+
+    let caught = null;
+    try {
+      for await (const _ of client.generateStream("len test", {
+        onMetadata: (m) => {
+          seenMeta = m;
+        },
+      })) {
+        // consume stream
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    const valid =
+      caught instanceof GroqClientError &&
+      caught.code === "incomplete_output" &&
+      caught.finishReason === "length" &&
+      seenMeta?.finishReason === "length";
+    results.finishReasonLengthRaisesIncompleteOutput = {
+      isGroqClientError: caught instanceof GroqClientError,
+      code: caught?.code,
+      finishReason: caught?.finishReason,
+      metaFinishReason: seenMeta?.finishReason,
+      valid,
+    };
+    if (!valid) results.passed = false;
+  }
+
+  // 13. Default max_completion_tokens (8192) is sent and per-call maxTokens override works
+  {
+    const bodies = [];
+    const fakeFetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(
+        makeStream([
+          groqSseChunk('{"stepNumber":1}'),
+          "data: " +
+            JSON.stringify({
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            }) +
+            "\n\n",
+          "data: [DONE]\n\n",
+        ]),
+        { status: 200 }
+      );
+    };
+    const client = new GroqModelClient({
+      apiKey: "gsk_fake_tokens",
+      fetch: fakeFetch,
+    });
+    for await (const _ of client.generateStream("default tokens")) {}
+    for await (const _ of client.generateStream("override tokens", {
+      maxTokens: 16384,
+    })) {}
+
+    const valid =
+      DEFAULT_GROQ_MAX_TOKENS >= 8000 &&
+      bodies[0]?.max_completion_tokens === DEFAULT_GROQ_MAX_TOKENS &&
+      bodies[1]?.max_completion_tokens === 16384;
+    results.maxTokensSentInBodyAndOverridable = {
+      defaultMaxTokens: DEFAULT_GROQ_MAX_TOKENS,
+      firstReqMaxTokens: bodies[0]?.max_completion_tokens,
+      secondReqMaxTokens: bodies[1]?.max_completion_tokens,
       valid,
     };
     if (!valid) results.passed = false;

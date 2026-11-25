@@ -16,6 +16,7 @@ import {
   generateScene,
   ALLOWED_PALETTE_NAMES,
   type ModelClient,
+  type ModelGenerateOptions,
 } from "../src/generatePipeline.ts";
 import { PRIMITIVE_BOUNDS } from "../src/sceneValidator.ts";
 import type { SceneStep } from "../src/types.ts";
@@ -108,8 +109,11 @@ function wrapDebugClient(
   onChunk: (chunk: string) => void
 ): ModelClient {
   return {
-    async *generateStream(prompt: string): AsyncIterable<string> {
-      for await (const chunk of inner.generateStream(prompt)) {
+    async *generateStream(
+      prompt: string,
+      options?: ModelGenerateOptions
+    ): AsyncIterable<string> {
+      for await (const chunk of inner.generateStream(prompt, options)) {
         onChunk(chunk);
         yield chunk;
       }

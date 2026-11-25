@@ -1,12 +1,21 @@
 import {
   FakeModelClient,
   buildPrompt,
+  buildRetryPrompt,
   parseStreamedSteps,
   generateScene,
   DEFAULT_MAX_RETRIES_PER_STEP,
+  DEFAULT_INITIAL_MAX_TOKENS,
   ALLOWED_PALETTE_NAMES,
 } from '../src/generatePipeline.ts';
-import { PRIMITIVE_BOUNDS } from '../src/sceneValidator.ts';
+import { PRIMITIVE_BOUNDS, checkSceneCompleteness } from '../src/sceneValidator.ts';
+import {
+  MM_PER_VIEWER_UNIT,
+  normalizeSceneToViewerUnits,
+  VIEWER_PRIMITIVE_BOUNDS,
+} from '../src/sceneUnits.ts';
+import { sceneStepToBuildStep } from '../src/builds.ts';
+import { DESK_SCENE } from '../src/fixtures/desk.scene.ts';
 
 const testResults = {
   buildPrompt: {},
@@ -27,6 +36,21 @@ const testResults = {
   missingClosingBraceAtCapAndEof: {},
   malformedObjectPreservesLaterPrettyObjects: {},
   fencedPrettyPrintedStream: {},
+  normalizeBackPanelAndDistance: {},
+  scaleTogetherAndPreserveAnglesQty: {},
+  normalizeDoesNotMutateInput: {},
+  endToEndMmNormalizesAndValidates: {},
+  unitLabelsCmForGeneratedDeskUnchanged: {},
+  backPanel1800MmBecomes180Not18: {},
+  promptDoesNotAskForCentimeters: {},
+  clampDistanceLowFor180CmModel: {},
+  distanceUnchangedWhenWithinBounds: {},
+  missingCameraPresetSetsDefaults: {},
+  deskFixtureDistancesUntouched: {},
+  retryPromptHasStep2AndUsedPartIds: {},
+  incompleteOutputRetriesWithSameRequestAndHigherTokens: {},
+  retryMissingShapeRejectedBeforeValidator: {},
+  completenessCheckSuite: {},
   passed: true,
 };
 
@@ -66,6 +90,10 @@ async function runTests() {
     prompt.includes(p)
   );
   const containsBounds = prompt.includes('5000') && prompt.includes('2500');
+  const staysMillimeters =
+    prompt.includes('MILLIMETERS') &&
+    !/centimeters?/i.test(prompt) &&
+    !/\bcm\b/i.test(prompt);
   const containsPalettes = ['tan', 'ink', 'sun', 'brown'].every((c) => prompt.includes(c));
 
   testResults.buildPrompt = {
@@ -73,8 +101,15 @@ async function runTests() {
     containsSchema,
     containsPrimitives,
     containsBounds,
+    staysMillimeters,
     containsPalettes,
-    valid: containsRequest && containsSchema && containsPrimitives && containsBounds && containsPalettes,
+    valid:
+      containsRequest &&
+      containsSchema &&
+      containsPrimitives &&
+      containsBounds &&
+      staysMillimeters &&
+      containsPalettes,
   };
   if (!testResults.buildPrompt.valid) testResults.passed = false;
 
@@ -572,6 +607,838 @@ async function runTests() {
     valid: resFencedPretty.success === true && resFencedPretty.steps.length === 2,
   };
   if (!testResults.fencedPrettyPrintedStream.valid) testResults.passed = false;
+
+  // 19. Back panel 800 x 1800 x 5 mm with cameraPreset.distance 2000 normalizes to 80 x 180 x 0.5 with distance 200
+  const mmBackPanelScene = {
+    schemaVersion: 1,
+    name: 'bookcase-mm',
+    steps: [
+      {
+        stepNumber: 3,
+        title: 'Attach Back Panel',
+        cameraPreset: { distance: 2000, phi: 1.05, theta: 0.72 },
+        parts: [
+          {
+            id: 'back-panel-1',
+            name: 'Bookcase Back Panel',
+            primitive: 'box',
+            dimensions: { width: 800, height: 1800, depth: 5 },
+            position: { x: 0, y: 900, z: -147.5 },
+            rotation: { x: 0, y: -90, z: 0 },
+            color: 'tan',
+            material: 'oak',
+            step: 3,
+            qty: 2,
+          },
+        ],
+      },
+    ],
+  };
+  const mmSnapshotBefore = JSON.stringify(mmBackPanelScene);
+  const normalizedBackPanelScene = normalizeSceneToViewerUnits(mmBackPanelScene);
+  const normStep = normalizedBackPanelScene.steps[0];
+  const normPart = normStep.parts[0];
+
+  testResults.normalizeBackPanelAndDistance = {
+    factor: MM_PER_VIEWER_UNIT,
+    dimensions: { ...normPart.dimensions },
+    distance: normStep.cameraPreset?.distance,
+    valid:
+      MM_PER_VIEWER_UNIT === 10 &&
+      normPart.dimensions.width === 80 &&
+      normPart.dimensions.height === 180 &&
+      normPart.dimensions.depth === 0.5 &&
+      normStep.cameraPreset?.distance === 288,
+  };
+  if (!testResults.normalizeBackPanelAndDistance.valid) testResults.passed = false;
+
+  // 20. Position and dimension values scale together; phi, theta, qty, rotation, and segment counts unchanged
+  const multiGeomScene = {
+    schemaVersion: 1,
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Multi-Primitive Step',
+        cameraPreset: { distance: 1250, phi: 1.12, theta: 0.48 },
+        parts: [
+          {
+            id: 'dowels-1',
+            name: 'Support Rod',
+            primitive: 'cylinder',
+            dimensions: { radius: 12, height: 350, radialSegments: 24 },
+            position: { x: -200, y: 175, z: 120 },
+            rotation: { x: 0, y: 45, z: 90 },
+            color: 'sun',
+            material: 'brass',
+            step: 1,
+            qty: 4,
+          },
+        ],
+      },
+    ],
+  };
+  const normMulti = normalizeSceneToViewerUnits(multiGeomScene);
+  const multiStep = normMulti.steps[0];
+  const multiPart = multiStep.parts[0];
+
+  testResults.scaleTogetherAndPreserveAnglesQty = {
+    position: multiPart.position,
+    dimensions: multiPart.dimensions,
+    phi: multiStep.cameraPreset?.phi,
+    theta: multiStep.cameraPreset?.theta,
+    rotation: multiPart.rotation,
+    qty: multiPart.qty,
+    valid:
+      normPart.position.x === 0 &&
+      normPart.position.y === 90 &&
+      normPart.position.z === -14.75 &&
+      normStep.cameraPreset?.phi === 1.05 &&
+      normStep.cameraPreset?.theta === 0.72 &&
+      normPart.rotation.x === 0 &&
+      normPart.rotation.y === -90 &&
+      normPart.rotation.z === 0 &&
+      normPart.qty === 2 &&
+      multiPart.dimensions.radius === 1.2 &&
+      multiPart.dimensions.height === 35 &&
+      multiPart.dimensions.radialSegments === 24 &&
+      multiPart.position.x === -20 &&
+      multiPart.position.y === 17.5 &&
+      multiPart.position.z === 12 &&
+      multiPart.rotation.y === 45 &&
+      multiPart.rotation.z === 90 &&
+      multiPart.qty === 4 &&
+      multiStep.cameraPreset?.distance === 125 &&
+      multiStep.cameraPreset?.phi === 1.12 &&
+      multiStep.cameraPreset?.theta === 0.48,
+  };
+  if (!testResults.scaleTogetherAndPreserveAnglesQty.valid) testResults.passed = false;
+
+  // 21. normalizeSceneToViewerUnits does not mutate its input
+  normPart.dimensions.width = 9999;
+  normPart.position.y = 9999;
+  normPart.rotation.y = 9999;
+  if (normStep.cameraPreset) normStep.cameraPreset.distance = 9999;
+
+  testResults.normalizeDoesNotMutateInput = {
+    notSameRef: normalizedBackPanelScene !== mmBackPanelScene,
+    inputUnchanged: JSON.stringify(mmBackPanelScene) === mmSnapshotBefore,
+    valid:
+      normalizedBackPanelScene !== mmBackPanelScene &&
+      JSON.stringify(mmBackPanelScene) === mmSnapshotBefore &&
+      mmBackPanelScene.steps[0].parts[0].dimensions.width === 800 &&
+      mmBackPanelScene.steps[0].cameraPreset.distance === 2000,
+  };
+  if (!testResults.normalizeDoesNotMutateInput.valid) testResults.passed = false;
+
+  // 22. End-to-end generateScene run with FakeModelClient returning mm output validates normalized numbers
+  const bookcaseStep1 = {
+    stepNumber: 1,
+    title: 'Stand Side Uprights',
+    cameraPreset: { distance: 1800, phi: 1.1, theta: 0.6 },
+    parts: [
+      {
+        id: 'upright-left',
+        name: 'Left Upright',
+        primitive: 'box',
+        dimensions: { width: 25, height: 1800, depth: 300 },
+        position: { x: -387.5, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+      {
+        id: 'upright-right',
+        name: 'Right Upright',
+        primitive: 'box',
+        dimensions: { width: 25, height: 1800, depth: 300 },
+        position: { x: 387.5, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+    ],
+  };
+  const bookcaseStep2 = {
+    stepNumber: 2,
+    title: 'Install Horizontal Shelves',
+    cameraPreset: { distance: 1900, phi: 1.0, theta: 0.7 },
+    parts: [
+      {
+        id: 'shelf-bottom',
+        name: 'Bottom Shelf',
+        primitive: 'box',
+        dimensions: { width: 750, height: 25, depth: 295 },
+        position: { x: 0, y: 50, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const bookcaseStep3 = {
+    stepNumber: 3,
+    title: 'Attach Back Panel',
+    cameraPreset: { distance: 2000, phi: 1.05, theta: 0.55 },
+    parts: [
+      {
+        id: 'back-panel',
+        name: 'Back Panel',
+        primitive: 'box',
+        dimensions: { width: 800, height: 1800, depth: 5 },
+        position: { x: 0, y: 900, z: -147.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'cream',
+        material: 'plywood',
+        step: 3,
+        qty: 1,
+      },
+    ],
+  };
+
+  const e2eClient = new FakeModelClient([
+    [
+      JSON.stringify(bookcaseStep1) + '\n',
+      JSON.stringify(bookcaseStep2) + '\n',
+      JSON.stringify(bookcaseStep3) + '\n',
+    ],
+  ]);
+  const streamedValidSteps = [];
+  const resE2E = await generateScene('build a 4-shelf bookcase', e2eClient, {
+    onStep: (step, status) => {
+      if (status === 'valid' && step) streamedValidSteps.push(step);
+    },
+  });
+  const e2eBackPanel = resE2E.steps[2]?.parts?.[0];
+  const e2eStep3 = resE2E.steps[2];
+
+  testResults.endToEndMmNormalizesAndValidates = {
+    success: resE2E.success,
+    stepCount: resE2E.steps.length,
+    boxMaxCm: VIEWER_PRIMITIVE_BOUNDS.box.width.max,
+    step3Dimensions: e2eBackPanel?.dimensions,
+    step3Position: e2eBackPanel?.position,
+    step3CameraPreset: e2eStep3?.cameraPreset,
+    streamedBackPanelWidth: streamedValidSteps[2]?.parts?.[0]?.dimensions?.width,
+    valid:
+      resE2E.success === true &&
+      resE2E.steps.length === 3 &&
+      VIEWER_PRIMITIVE_BOUNDS.box.width.max === 500 &&
+      e2eBackPanel?.dimensions.width === 80 &&
+      e2eBackPanel?.dimensions.height === 180 &&
+      e2eBackPanel?.dimensions.depth === 0.5 &&
+      e2eBackPanel?.position.x === 0 &&
+      e2eBackPanel?.position.y === 90 &&
+      e2eBackPanel?.position.z === -14.75 &&
+      e2eStep3?.cameraPreset?.distance === 288 &&
+      e2eStep3?.cameraPreset?.phi === 1.05 &&
+      e2eStep3?.cameraPreset?.theta === 0.55 &&
+      streamedValidSteps[2]?.parts?.[0]?.dimensions?.width === 80,
+  };
+  if (!testResults.endToEndMmNormalizesAndValidates.valid) testResults.passed = false;
+
+  // 23. Unit labels show "cm" for generated scenes while keeping "mm" for hand-built DESK_SCENE
+  const generatedBuildStep = sceneStepToBuildStep(resE2E.steps[2]);
+  const deskBuildStep = sceneStepToBuildStep(DESK_SCENE.steps[0]);
+
+  testResults.unitLabelsCmForGeneratedDeskUnchanged = {
+    generatedDimText: generatedBuildStep.parts[0]?.dimensions,
+    deskDimText: deskBuildStep.parts[0]?.dimensions,
+    valid:
+      generatedBuildStep.parts[0]?.dimensions === '80 × 180 × 0.5 cm' &&
+      deskBuildStep.parts[0]?.dimensions.endsWith(' mm'),
+  };
+  if (!testResults.unitLabelsCmForGeneratedDeskUnchanged.valid) testResults.passed = false;
+
+  // 24. Regression: 1800 mm back panel normalizes once to 180 (not 18) end-to-end
+  const regressionClient = new FakeModelClient([[JSON.stringify(mmBackPanelScene.steps[0]) + '\n']]);
+  const resRegression = await generateScene('build a 4-shelf bookcase', regressionClient);
+  const regPart = resRegression.steps[0]?.parts?.[0];
+  const regDistance = resRegression.steps[0]?.cameraPreset?.distance;
+  testResults.backPanel1800MmBecomes180Not18 = {
+    success: resRegression.success,
+    height: regPart?.dimensions?.height,
+    width: regPart?.dimensions?.width,
+    depth: regPart?.dimensions?.depth,
+    distance: regDistance,
+    valid:
+      resRegression.success === true &&
+      regPart?.dimensions?.height === 180 &&
+      regPart?.dimensions?.height !== 18 &&
+      regPart?.dimensions?.width === 80 &&
+      regPart?.dimensions?.depth === 0.5 &&
+      regDistance === 288 &&
+      regDistance !== 20,
+  };
+  if (!testResults.backPanel1800MmBecomes180Not18.valid) testResults.passed = false;
+
+  // 25. Regression: buildPrompt does not contain "centimeters" or "cm" in its dimension instructions
+  const recordedPrompt = regressionClient.recordedPrompts[0] ?? '';
+  const dimSectionStart = recordedPrompt.indexOf('=== DIMENSION');
+  const dimSectionEnd = recordedPrompt.indexOf('=== ALLOWED PALETTE', dimSectionStart);
+  const dimInstructions =
+    dimSectionStart >= 0 && dimSectionEnd > dimSectionStart
+      ? recordedPrompt.slice(dimSectionStart, dimSectionEnd)
+      : recordedPrompt;
+
+  testResults.promptDoesNotAskForCentimeters = {
+    hasDimensionBoundsHeader: dimInstructions.includes('=== DIMENSION BOUNDS (MILLIMETERS & CONSTRAINTS) ==='),
+    hasCentimetersWord: /centimeters?/i.test(dimInstructions),
+    hasCmToken: /\bcm\b/i.test(dimInstructions),
+    valid:
+      dimInstructions.includes('=== DIMENSION BOUNDS (MILLIMETERS & CONSTRAINTS) ===') &&
+      !/centimeters?/i.test(dimInstructions) &&
+      !/\bcm\b/i.test(dimInstructions),
+  };
+  if (!testResults.promptDoesNotAskForCentimeters.valid) testResults.passed = false;
+
+  // 26. Clamp test: 180 cm model with normalized distance 50 (raw 500 mm) clamps to 288 (including cumulative small step)
+  const lowDistBookcaseStream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Frame',
+      cameraPreset: { distance: 500, phi: 1.15, theta: 0.45 },
+      parts: [
+        {
+          id: 'side_180',
+          name: 'Side Panel',
+          primitive: 'box',
+          dimensions: { width: 20, height: 1800, depth: 300 },
+          position: { x: -390, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+    JSON.stringify({
+      stepNumber: 2,
+      title: 'Small Screw Step',
+      cameraPreset: { distance: 500, phi: 1.25, theta: 0.55 },
+      parts: [
+        {
+          id: 'screw_small',
+          name: 'Wood Screw',
+          primitive: 'cylinder',
+          dimensions: { radius: 2, height: 30, radialSegments: 16 },
+          position: { x: 0, y: 50, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'grey',
+          material: 'steel',
+          step: 2,
+          qty: 8,
+        },
+      ],
+    }) + '\n',
+  ];
+  const resLowDist = await generateScene(
+    'build a 4-shelf bookcase',
+    new FakeModelClient([lowDistBookcaseStream])
+  );
+  const step1Preset = resLowDist.steps[0]?.cameraPreset;
+  const step2Preset = resLowDist.steps[1]?.cameraPreset;
+  testResults.clampDistanceLowFor180CmModel = {
+    step1Distance: step1Preset?.distance,
+    step2Distance: step2Preset?.distance,
+    phiPreserved: step1Preset?.phi === 1.15 && step2Preset?.phi === 1.25,
+    thetaPreserved: step1Preset?.theta === 0.45 && step2Preset?.theta === 0.55,
+    valid:
+      resLowDist.success === true &&
+      step1Preset?.distance === 288 &&
+      step2Preset?.distance === 288 &&
+      step1Preset?.phi === 1.15 &&
+      step1Preset?.theta === 0.45 &&
+      step2Preset?.phi === 1.25 &&
+      step2Preset?.theta === 0.55,
+  };
+  if (!testResults.clampDistanceLowFor180CmModel.valid) testResults.passed = false;
+
+  // 27. Distance unchanged when within [1.6 * maxExtent, 400] (distance 300 for 180 cm; distance 200 for 100 cm; max cap 400)
+  const unchangedStream180 = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Wide Shot 180cm',
+      cameraPreset: { distance: 3000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_180_ok',
+          name: 'Panel 180cm',
+          primitive: 'box',
+          dimensions: { width: 800, height: 1800, depth: 20 },
+          position: { x: 0, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const unchangedStream100 = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Medium Model 100cm',
+      cameraPreset: { distance: 2000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_100_ok',
+          name: 'Panel 100cm',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const overMaxStream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Over Max Cap',
+      cameraPreset: { distance: 6000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_100_cap',
+          name: 'Panel',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const res300 = await generateScene('180cm at 300', new FakeModelClient([unchangedStream180]));
+  const res200 = await generateScene('100cm at 200', new FakeModelClient([unchangedStream100]));
+  const resOverMax = await generateScene('over max 400', new FakeModelClient([overMaxStream]));
+  testResults.distanceUnchangedWhenWithinBounds = {
+    dist180At300: res300.steps[0]?.cameraPreset?.distance,
+    dist100At200: res200.steps[0]?.cameraPreset?.distance,
+    distOverMaxClamped: resOverMax.steps[0]?.cameraPreset?.distance,
+    valid:
+      res300.steps[0]?.cameraPreset?.distance === 300 &&
+      res200.steps[0]?.cameraPreset?.distance === 200 &&
+      resOverMax.steps[0]?.cameraPreset?.distance === 400,
+  };
+  if (!testResults.distanceUnchangedWhenWithinBounds.valid) testResults.passed = false;
+
+  // 28. Missing cameraPreset (or missing distance) fills default phi=1.0, theta=0.6 and clamped distance
+  const missingPreset180Stream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'No Preset 180cm',
+      parts: [
+        {
+          id: 'panel_no_preset_180',
+          name: 'Panel 180cm',
+          primitive: 'box',
+          dimensions: { width: 800, height: 1800, depth: 20 },
+          position: { x: 0, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const missingPreset100Stream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'No Preset 100cm',
+      parts: [
+        {
+          id: 'panel_no_preset_100',
+          name: 'Panel 100cm',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const resNoPreset180 = await generateScene(
+    '180cm no preset',
+    new FakeModelClient([missingPreset180Stream])
+  );
+  const resNoPreset100 = await generateScene(
+    '100cm no preset',
+    new FakeModelClient([missingPreset100Stream])
+  );
+  const preset180 = resNoPreset180.steps[0]?.cameraPreset;
+  const preset100 = resNoPreset100.steps[0]?.cameraPreset;
+  testResults.missingCameraPresetSetsDefaults = {
+    preset180,
+    preset100,
+    valid:
+      resNoPreset180.success === true &&
+      resNoPreset100.success === true &&
+      preset180?.distance === 288 &&
+      preset180?.phi === 1.0 &&
+      preset180?.theta === 0.6 &&
+      preset100?.distance === 160 &&
+      preset100?.phi === 1.0 &&
+      preset100?.theta === 0.6,
+  };
+  if (!testResults.missingCameraPresetSetsDefaults.valid) testResults.passed = false;
+
+  // 29. Desk fixture distances are never modified
+  const deskDistances = DESK_SCENE.steps.map((s) => s.cameraPreset?.distance);
+  const expectedDeskDistances = [90, 85, 95, 100, 75, 88];
+  testResults.deskFixtureDistancesUntouched = {
+    deskDistances,
+    expectedDeskDistances,
+    valid: JSON.stringify(deskDistances) === JSON.stringify(expectedDeskDistances),
+  };
+  if (!testResults.deskFixtureDistancesUntouched.valid) testResults.passed = false;
+
+  // 30. Retry prompt for step 2 contains "step 2", step title, used part IDs, schema, and concrete example
+  const retryPromptStep2 = buildRetryPrompt({
+    originalRequest: 'build a 4-shelf bookcase',
+    stepNumber: 2,
+    stepTitle: 'Attach Shelves',
+    invalidStep: { stepNumber: 2, parts: [] },
+    errors: ["Retry step missing non-empty 'parts' array."],
+    previousSteps: [
+      JSON.parse(
+        JSON.stringify({
+          stepNumber: 1,
+          title: 'Side Panels',
+          parts: [
+            {
+              id: 'left_side_panel',
+              name: 'Left',
+              primitive: 'box',
+              dimensions: { width: 2, height: 180, depth: 30 },
+              position: { x: -39, y: 90, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 },
+              color: 'tan',
+              material: 'oak',
+              step: 1,
+              qty: 1,
+            },
+            {
+              id: 'right_side_panel',
+              name: 'Right',
+              primitive: 'box',
+              dimensions: { width: 2, height: 180, depth: 30 },
+              position: { x: 39, y: 90, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 },
+              color: 'tan',
+              material: 'oak',
+              step: 1,
+              qty: 1,
+            },
+          ],
+        })
+      ),
+    ],
+    schema: dummySchema,
+  });
+  testResults.retryPromptHasStep2AndUsedPartIds = {
+    hasStep2: retryPromptStep2.includes('step 2'),
+    hasTitle: retryPromptStep2.includes('Attach Shelves'),
+    hasUsedIds:
+      retryPromptStep2.includes('left_side_panel') &&
+      retryPromptStep2.includes('right_side_panel'),
+    hasSchema: retryPromptStep2.includes('schemaVersion'),
+    hasReturnDirective: retryPromptStep2.includes(
+      'Return one complete JSON step object for step 2, nothing else.'
+    ),
+    valid:
+      retryPromptStep2.includes('step 2') &&
+      retryPromptStep2.includes('Attach Shelves') &&
+      retryPromptStep2.includes('left_side_panel') &&
+      retryPromptStep2.includes('right_side_panel') &&
+      retryPromptStep2.includes('schemaVersion') &&
+      retryPromptStep2.includes('EXAMPLE VALID STEP OBJECT') &&
+      retryPromptStep2.includes(
+        'Return one complete JSON step object for step 2, nothing else.'
+      ),
+  };
+  if (!testResults.retryPromptHasStep2AndUsedPartIds.valid) testResults.passed = false;
+
+  // 31. incomplete_output error retries with the SAME initial request and higher maxTokens (doubled)
+  let incompleteCallIdx = 0;
+  const incompleteMockClient = new FakeModelClient([
+    () => {
+      incompleteCallIdx++;
+      async function* gen() {
+        yield '{"stepNumber":1,"title":"Side","parts":[{"id":"side_l"';
+        const err = new Error('incomplete_output: finish_reason=length');
+        err.code = 'incomplete_output';
+        err.finishReason = 'length';
+        throw err;
+      }
+      return gen();
+    },
+    [makeStepJson(1) + '\n', makeStepJson(2) + '\n'],
+  ]);
+  const resIncompleteRetry = await generateScene(
+    'incomplete stream test',
+    incompleteMockClient
+  );
+  testResults.incompleteOutputRetriesWithSameRequestAndHigherTokens = {
+    success: resIncompleteRetry.success,
+    stepCount: resIncompleteRetry.steps.length,
+    samePromptReused:
+      incompleteMockClient.recordedPrompts.length === 2 &&
+      incompleteMockClient.recordedPrompts[0] ===
+        incompleteMockClient.recordedPrompts[1],
+    firstMaxTokens: incompleteMockClient.recordedOptions[0]?.maxTokens,
+    secondMaxTokens: incompleteMockClient.recordedOptions[1]?.maxTokens,
+    valid:
+      resIncompleteRetry.success === true &&
+      resIncompleteRetry.steps.length === 2 &&
+      incompleteMockClient.recordedPrompts[0] ===
+        incompleteMockClient.recordedPrompts[1] &&
+      incompleteMockClient.recordedOptions[0]?.maxTokens ===
+        DEFAULT_INITIAL_MAX_TOKENS &&
+      incompleteMockClient.recordedOptions[1]?.maxTokens ===
+        DEFAULT_INITIAL_MAX_TOKENS * 2,
+  };
+  if (!testResults.incompleteOutputRetriesWithSameRequestAndHigherTokens.valid) {
+    testResults.passed = false;
+  }
+
+  // 32. Retry response missing stepNumber/title/parts/id is rejected before validator and retried
+  const shapeRetryClient = new FakeModelClient([
+    [
+      makeStepJson(1) + '\n',
+      JSON.stringify({
+        stepNumber: 2,
+        title: 'Bad Step 2',
+        parts: [
+          {
+            id: 'bad_w_2',
+            primitive: 'box',
+            dimensions: { width: 9999, height: 20, depth: 20 },
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            color: 'tan',
+            material: 'oak',
+            step: 2,
+            qty: 1,
+          },
+        ],
+      }) + '\n',
+    ],
+    // Retry 1 missing parts/stepNumber/title -> rejected by shape gate
+    [JSON.stringify({ step: 2, description: 'incomplete shape' }) + '\n'],
+    // Retry 2 valid
+    [makeStepJson(2) + '\n'],
+  ]);
+  const resShapeGate = await generateScene('shape gate test', shapeRetryClient, {
+    schema: { definitions: { SceneStep: { type: 'object' } } },
+  });
+  testResults.retryMissingShapeRejectedBeforeValidator = {
+    success: resShapeGate.success,
+    stepCount: resShapeGate.steps.length,
+    retriesCount: resShapeGate.retriesLogged.length,
+    secondRetrySawShapeError: resShapeGate.retriesLogged[1]?.errors?.some((e) =>
+      e.includes('Retry step missing')
+    ),
+    retryUsedResponseFormat: Boolean(
+      shapeRetryClient.recordedOptions[1]?.responseFormat
+    ),
+    valid:
+      resShapeGate.success === true &&
+      resShapeGate.steps.length === 2 &&
+      resShapeGate.retriesLogged.length === 2 &&
+      Boolean(
+        resShapeGate.retriesLogged[1]?.errors?.some((e) =>
+          e.includes('Retry step missing')
+        )
+      ) &&
+      Boolean(shapeRetryClient.recordedOptions[1]?.responseFormat),
+  };
+  if (!testResults.retryMissingShapeRejectedBeforeValidator.valid) {
+    testResults.passed = false;
+  }
+
+  // 33. Scene completeness check: missing back panel triggers continuation retry & fails if unfixed; complete scene & desk pass
+  const compStep1 = {
+    stepNumber: 1,
+    title: 'Side Panels',
+    description:
+      'Build the side panels, top panel, bottom panel, shelves, and back panel.',
+    parts: [
+      {
+        id: 'c_side_left',
+        name: 'Left Side Panel',
+        primitive: 'box',
+        dimensions: { width: 18, height: 1800, depth: 300 },
+        position: { x: -391, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+      {
+        id: 'c_side_right',
+        name: 'Right Side Panel',
+        primitive: 'box',
+        dimensions: { width: 18, height: 1800, depth: 300 },
+        position: { x: 391, y: 900, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 1,
+        qty: 1,
+      },
+    ],
+  };
+  const compStep2 = {
+    stepNumber: 2,
+    title: 'Add Top, Bottom, and Shelves',
+    parts: [
+      {
+        id: 'c_bottom_panel',
+        name: 'Bottom Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 9, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_top_panel',
+        name: 'Top Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 1791, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_shelf_1',
+        name: 'Shelf 1',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 600, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+      {
+        id: 'c_shelf_2',
+        name: 'Shelf 2',
+        primitive: 'box',
+        dimensions: { width: 764, height: 18, depth: 300 },
+        position: { x: 0, y: 1200, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'tan',
+        material: 'oak',
+        step: 2,
+        qty: 1,
+      },
+    ],
+  };
+  const compStep3 = {
+    stepNumber: 3,
+    title: 'Attach Back Panel',
+    parts: [
+      {
+        id: 'c_back_panel',
+        name: 'Back Panel',
+        primitive: 'box',
+        dimensions: { width: 764, height: 1764, depth: 5 },
+        position: { x: 0, y: 900, z: -147.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        color: 'brown',
+        material: 'plywood',
+        step: 3,
+        qty: 1,
+      },
+    ],
+  };
+
+  // Case A: Incomplete without back panel triggers continuation retry and succeeds once step 3 arrives
+  const retryToCompleteClient = new FakeModelClient([
+    [JSON.stringify(compStep1) + '\n', JSON.stringify(compStep2) + '\n'],
+    [JSON.stringify(compStep3) + '\n'],
+  ]);
+  const resCompletedAfterRetry = await generateScene(
+    'build a shelving unit',
+    retryToCompleteClient
+  );
+
+  // Case B: Still missing back panel after retries fails cleanly
+  const alwaysIncompleteClient = new FakeModelClient([
+    [JSON.stringify(compStep1) + '\n', JSON.stringify(compStep2) + '\n'],
+    [],
+  ]);
+  const resMissingBackPanel = await generateScene(
+    'build a shelving unit',
+    alwaysIncompleteClient,
+    { maxRetriesPerStep: 1 }
+  );
+
+  // Case C: Complete scene & desk fixture pass checkSceneCompleteness cleanly
+  const incompleteDirectErrors = checkSceneCompleteness({
+    steps: [compStep1, compStep2],
+  });
+  const completeDirectErrors = checkSceneCompleteness({
+    steps: [compStep1, compStep2, compStep3],
+  });
+  const deskDirectErrors = checkSceneCompleteness({
+    steps: DESK_SCENE.steps,
+  });
+
+  testResults.completenessCheckSuite = {
+    incompleteDirectErrorCount: incompleteDirectErrors.length,
+    completeDirectErrorCount: completeDirectErrors.length,
+    deskDirectErrorCount: deskDirectErrors.length,
+    retriedSuccess: resCompletedAfterRetry.success,
+    retriedStepCount: resCompletedAfterRetry.steps.length,
+    retriedCount: resCompletedAfterRetry.retriesLogged.length,
+    unfixedSuccess: resMissingBackPanel.success,
+    unfixedError: resMissingBackPanel.error ?? '',
+    valid:
+      incompleteDirectErrors.length > 0 &&
+      completeDirectErrors.length === 0 &&
+      deskDirectErrors.length === 0 &&
+      resCompletedAfterRetry.success === true &&
+      resCompletedAfterRetry.steps.length === 3 &&
+      resCompletedAfterRetry.retriesLogged.length === 1 &&
+      resMissingBackPanel.success === false &&
+      typeof resMissingBackPanel.error === 'string' &&
+      resMissingBackPanel.error.toLowerCase().includes('back panel'),
+  };
+  if (!testResults.completenessCheckSuite.valid) {
+    testResults.passed = false;
+  }
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }

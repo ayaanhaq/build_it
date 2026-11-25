@@ -6,6 +6,7 @@
  */
 
 import type {
+  BoxDimensions,
   Scene,
   ScenePart,
   ScenePrimitiveType,
@@ -114,7 +115,9 @@ export function isFiniteNumber(val: unknown): val is number {
 export function validatePartDimensions(
   part: ScenePart,
   partRef: string,
-  errors: string[]
+  errors: string[],
+  boundsTable: Record<string, Record<string, DimensionBound>> = PRIMITIVE_BOUNDS,
+  unitLabel: string = "mm"
 ): void {
   const primitive = part.primitive;
   const dims = part.dimensions && typeof part.dimensions === "object" ? part.dimensions : null;
@@ -124,7 +127,7 @@ export function validatePartDimensions(
     return;
   }
 
-  const bounds = PRIMITIVE_BOUNDS[primitive];
+  const bounds = boundsTable[primitive] ?? PRIMITIVE_BOUNDS[primitive];
 
   if (primitive === "box" || primitive === "bevel") {
     for (const requiredKey of ["width", "height", "depth"] as const) {
@@ -137,7 +140,7 @@ export function validatePartDimensions(
         const bound = bounds[requiredKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${requiredKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive '${primitive}'.`
+            `${partRef}: dimension '${requiredKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive '${primitive}'.`
           );
         }
       }
@@ -153,7 +156,7 @@ export function validatePartDimensions(
             const bound = bounds[optionalKey];
             if (bound && (val < bound.min || val > bound.max)) {
               errors.push(
-                `${partRef}: dimension '${optionalKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive '${primitive}'.`
+                `${partRef}: dimension '${optionalKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive '${primitive}'.`
               );
             }
           }
@@ -170,7 +173,7 @@ export function validatePartDimensions(
       const bound = bounds.height;
       if (height < bound.min || height > bound.max) {
         errors.push(
-          `${partRef}: dimension 'height' (${height} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'cylinder'.`
+          `${partRef}: dimension 'height' (${height} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'cylinder'.`
         );
       }
     }
@@ -193,7 +196,7 @@ export function validatePartDimensions(
           const bound = bounds[rKey];
           if (bound && (val < bound.min || val > bound.max)) {
             errors.push(
-              `${partRef}: dimension '${rKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'cylinder'.`
+              `${partRef}: dimension '${rKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'cylinder'.`
             );
           }
         }
@@ -224,7 +227,7 @@ export function validatePartDimensions(
         const bound = bounds[reqKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${reqKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'lathe'.`
+            `${partRef}: dimension '${reqKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'lathe'.`
           );
         }
       }
@@ -253,7 +256,7 @@ export function validatePartDimensions(
         const bound = bounds[reqKey];
         if (bound && (val < bound.min || val > bound.max)) {
           errors.push(
-            `${partRef}: dimension '${reqKey}' (${val} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'spring'.`
+            `${partRef}: dimension '${reqKey}' (${val} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'spring'.`
           );
         }
       }
@@ -279,7 +282,7 @@ export function validatePartDimensions(
         const bound = bounds.wireRadius;
         if (wire < bound.min || wire > bound.max) {
           errors.push(
-            `${partRef}: dimension 'wireRadius' (${wire} mm) is outside bounds [${bound.min}, ${bound.max}] mm for primitive 'spring'.`
+            `${partRef}: dimension 'wireRadius' (${wire} ${unitLabel}) is outside bounds [${bound.min}, ${bound.max}] ${unitLabel} for primitive 'spring'.`
           );
         }
       }
@@ -336,6 +339,14 @@ export interface StepValidationContext {
    * Callback invoked with the estimated vertex count for this step.
    */
   onStepVertices?: (vertices: number) => void;
+  /**
+   * Optional primitive bounds table (defaults to PRIMITIVE_BOUNDS in mm).
+   */
+  primitiveTable?: Record<string, Record<string, DimensionBound>>;
+  /**
+   * Optional unit label shown in dimension bounds errors (defaults to "mm").
+   */
+  unitLabel?: string;
 }
 
 /**
@@ -441,7 +452,13 @@ export function validateStep(
     stepVertices += partVerts;
 
     // Validate bounds and non-finite dimensions
-    validatePartDimensions(part as ScenePart, partRef, errors);
+    validatePartDimensions(
+      part as ScenePart,
+      partRef,
+      errors,
+      context.primitiveTable ?? PRIMITIVE_BOUNDS,
+      context.unitLabel ?? "mm"
+    );
 
     // Validate position and rotation vectors
     validatePartVectors(part as ScenePart, partRef, errors);
@@ -469,14 +486,23 @@ export function validateStep(
   return errors;
 }
 
+export interface ValidateSceneOptions {
+  primitiveTable?: Record<string, Record<string, DimensionBound>>;
+  unitLabel?: string;
+}
+
 /**
  * Validate a candidate 3D scene against all structural, topological, and safety rules.
  * Implemented on top of validateStep to eliminate rule duplication.
  *
  * @param data Unknown candidate scene input
+ * @param options Optional bounds table and unit label overrides
  * @returns Array of diagnostic error strings. An empty array indicates a valid scene.
  */
-export function validateScene(data: unknown): string[] {
+export function validateScene(
+  data: unknown,
+  options: ValidateSceneOptions = {}
+): string[] {
   const errors: string[] = [];
 
   if (!data || typeof data !== "object") {
@@ -544,6 +570,8 @@ export function validateScene(data: unknown): string[] {
     const stepErrors = validateStep(step, {
       seenPartIds,
       validStepNumbers,
+      primitiveTable: options.primitiveTable,
+      unitLabel: options.unitLabel,
       onStepVertices: (stepVerts) => {
         estimatedTotalVertices += stepVerts;
       },
@@ -563,6 +591,311 @@ export function validateScene(data: unknown): string[] {
     errors.push(
       `Estimated scene vertex total (${estimatedTotalVertices}) exceeds maximum limit of ${MAX_VERTICES_PER_SCENE} vertices.`
     );
+  }
+
+  // Check: Assembly completeness (Step-1 planned part groups and enclosure closures)
+  errors.push(...checkSceneCompleteness({ steps: scene.steps as SceneStep[] }));
+
+  return errors;
+}
+
+const TOKEN_SINGULAR_MAP: Record<string, string> = {
+  panels: "panel",
+  boards: "board",
+  plates: "plate",
+  rails: "rail",
+  bars: "bar",
+  beams: "beam",
+  frames: "frame",
+  shelves: "shelf",
+  drawers: "drawer",
+  doors: "door",
+  lids: "lid",
+  caps: "cap",
+  aprons: "apron",
+  stretchers: "stretcher",
+  braces: "brace",
+  posts: "post",
+  legs: "leg",
+  supports: "support",
+  walls: "wall",
+  slats: "slat",
+  trays: "tray",
+  glides: "glide",
+  handles: "handle",
+  spindles: "spindle",
+  springs: "spring",
+  baseplates: "baseplate",
+  cushions: "cushion",
+  armrests: "armrest",
+  backrests: "backrest",
+  sides: "side",
+  tops: "top",
+  tiers: "tier",
+  uprights: "upright",
+};
+
+const MODIFIER_SYNONYMS: Record<string, string[]> = {
+  back: ["back", "rear"],
+  rear: ["back", "rear"],
+  top: ["top", "upper", "roof", "crown", "cap", "lid"],
+  upper: ["top", "upper", "roof", "crown", "cap", "lid"],
+  bottom: ["bottom", "lower", "base", "floor"],
+  lower: ["bottom", "lower", "base", "floor"],
+  side: ["side", "upright", "lateral"],
+  left: ["left"],
+  right: ["right"],
+  front: ["front", "face"],
+};
+
+const NOUN_SYNONYMS: Record<string, string[]> = {
+  panel: ["panel", "board", "plate", "slab", "wall", "piece", "upright"],
+  board: ["board", "panel", "slab", "plate"],
+  plate: ["plate", "panel", "board", "baseplate"],
+  shelf: ["shelf", "tier"],
+  tray: ["tray", "drawer", "raceway"],
+  drawer: ["drawer", "tray"],
+  rail: ["rail", "bar", "apron", "stretcher"],
+  support: ["support", "brace", "stretcher", "post", "leg"],
+  top: ["top", "desktop", "tabletop", "slab", "cap", "lid"],
+};
+
+function tokenizeNormalized(text: string): string[] {
+  const rawTokens = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return rawTokens.map((tok) => TOKEN_SINGULAR_MAP[tok] ?? tok);
+}
+
+/**
+ * Extracts generic structural part groups planned or listed in step 1
+ * (`plan`, `title`, `subtitle`, `description`).
+ */
+export function extractPlannedPartGroups(step1: unknown): string[] {
+  if (!step1 || typeof step1 !== "object") {
+    return [];
+  }
+
+  const record = step1 as {
+    title?: unknown;
+    subtitle?: unknown;
+    description?: unknown;
+    plan?: unknown;
+  };
+
+  const groups = new Set<string>();
+
+  if (Array.isArray(record.plan)) {
+    for (const entry of record.plan) {
+      const text =
+        typeof entry === "string"
+          ? entry
+          : entry && typeof entry === "object"
+            ? String(
+                (entry as { name?: unknown; title?: unknown; part?: unknown })
+                  .name ??
+                  (entry as { title?: unknown }).title ??
+                  (entry as { part?: unknown }).part ??
+                  ""
+              )
+            : "";
+      const norm = tokenizeNormalized(text).join(" ");
+      if (norm) {
+        groups.add(norm);
+      }
+    }
+  } else if (typeof record.plan === "string" && record.plan.trim() !== "") {
+    for (const segment of record.plan.split(/[,;]|\band\b/i)) {
+      const norm = tokenizeNormalized(segment).join(" ");
+      if (norm) {
+        groups.add(norm);
+      }
+    }
+  }
+
+  const textSources = [record.subtitle, record.description]
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+    .join(" . ");
+
+  if (textSources) {
+    const qualifiedPattern =
+      /\b(left|right|side|top|bottom|back|rear|front|upper|lower)\s+(panel|panels|board|boards|plate|plates|rail|rails|bar|bars|beam|beams|frame|frames|shelf|shelves|drawer|drawers|door|doors|lid|lids|cap|caps|trim|apron|aprons|stretcher|stretchers|brace|braces|post|posts|leg|legs|support|supports|wall|walls|slat|slats|tray|trays|top)\b/gi;
+    for (const match of textSources.matchAll(qualifiedPattern)) {
+      const norm = tokenizeNormalized(`${match[1]} ${match[2]}`).join(" ");
+      if (norm) {
+        groups.add(norm);
+      }
+    }
+
+    const nounPattern =
+      /\b(shelves|shelf|drawers|drawer|doors|door|legs|leg|glides|glide|aprons|apron|stretchers|stretcher|spindle|baseplate|spring|desktop|tabletop|backrest|armrest|cushion|cushions|seat|headboard|footboard)\b/gi;
+    for (const match of textSources.matchAll(nounPattern)) {
+      const norm = tokenizeNormalized(match[1]).join(" ");
+      if (norm) {
+        groups.add(norm);
+      }
+    }
+  }
+
+  return Array.from(groups);
+}
+
+function partMatchesGroup(partTokens: string[], groupPhrase: string): boolean {
+  const groupTokens = tokenizeNormalized(groupPhrase);
+  if (groupTokens.length === 0) {
+    return true;
+  }
+
+  return groupTokens.every((reqTok, idx) => {
+    const synonyms =
+      idx === groupTokens.length - 1
+        ? NOUN_SYNONYMS[reqTok] ?? MODIFIER_SYNONYMS[reqTok] ?? [reqTok]
+        : MODIFIER_SYNONYMS[reqTok] ?? NOUN_SYNONYMS[reqTok] ?? [reqTok];
+    return partTokens.some((pt) => synonyms.includes(pt));
+  });
+}
+
+/**
+ * Checks scene completeness across all validated steps:
+ * 1. Every structural part group referenced in Step 1's plan or description appears in at least one step.
+ * 2. Multi-panel opposing-side enclosures with multiple horizontal tiers include both a top closure and a rear/back panel.
+ */
+export function checkSceneCompleteness(scene: { steps: SceneStep[] }): string[] {
+  const errors: string[] = [];
+  if (!scene || !Array.isArray(scene.steps) || scene.steps.length === 0) {
+    return errors;
+  }
+
+  const allParts: ScenePart[] = [];
+  for (const step of scene.steps) {
+    if (step && Array.isArray(step.parts)) {
+      for (const part of step.parts) {
+        if (part && typeof part === "object") {
+          allParts.push(part);
+        }
+      }
+    }
+  }
+  if (allParts.length === 0) {
+    return errors;
+  }
+
+  const partTokenLists = allParts.map((part) =>
+    tokenizeNormalized(`${part.name ?? ""} ${part.id ?? ""}`)
+  );
+
+  // 1. Verify every part group listed in Step 1 appears in at least one step
+  const plannedGroups = extractPlannedPartGroups(scene.steps[0]);
+  for (const group of plannedGroups) {
+    const found = partTokenLists.some((tokens) => partMatchesGroup(tokens, group));
+    if (!found) {
+      errors.push(
+        `Incomplete build: step 1 plan references '${group}', but no matching part appears in any step.`
+      );
+    }
+  }
+
+  // 2. Generic geometric check for vertical opposing-side enclosures with horizontal tiers
+  const verticalSidePanels: Array<{
+    x: number;
+    topY: number;
+    bottomY: number;
+    height: number;
+  }> = [];
+  const horizontalTiers: Array<{ topY: number; width: number }> = [];
+  let hasNamedTopClosure = false;
+  let hasNamedRearClosure = false;
+  let hasRearPlanePanel = false;
+
+  for (let i = 0; i < allParts.length; i++) {
+    const part = allParts[i];
+    const tokens = partTokenLists[i];
+    if (
+      tokens.some((t) =>
+        ["top", "upper", "roof", "crown", "cap", "lid", "desktop", "tabletop"].includes(t)
+      )
+    ) {
+      hasNamedTopClosure = true;
+    }
+    if (tokens.some((t) => ["back", "rear", "backrest", "backplate"].includes(t))) {
+      hasNamedRearClosure = true;
+    }
+
+    if (part.primitive !== "box" || !part.dimensions || !part.position) {
+      continue;
+    }
+    const dims = part.dimensions as BoxDimensions;
+    const pos = part.position;
+    if (
+      !isFiniteNumber(dims.width) ||
+      !isFiniteNumber(dims.height) ||
+      !isFiniteNumber(dims.depth) ||
+      !isFiniteNumber(pos.x) ||
+      !isFiniteNumber(pos.y)
+    ) {
+      continue;
+    }
+
+    // Thin tall vertical lateral panel (e.g., left/right upright or side wall)
+    const isLateralVerticalPanel =
+      dims.height >= dims.width * 3 &&
+      dims.depth >= dims.width * 3 &&
+      dims.height > dims.depth * 0.5;
+    if (isLateralVerticalPanel) {
+      verticalSidePanels.push({
+        x: pos.x,
+        topY: pos.y + dims.height / 2,
+        bottomY: pos.y - dims.height / 2,
+        height: dims.height,
+      });
+    }
+
+    // Thin wide horizontal board (e.g., shelf / bottom / top panel)
+    const isHorizontalBoard =
+      dims.width >= dims.height * 3 && dims.depth >= dims.height * 2;
+    if (isHorizontalBoard) {
+      horizontalTiers.push({
+        topY: pos.y + dims.height / 2,
+        width: dims.width,
+      });
+    }
+
+    // Thin vertical front/rear panel (small depth compared to width & height)
+    const isRearFacingPanel =
+      dims.width >= dims.depth * 3 && dims.height >= dims.depth * 3;
+    if (isRearFacingPanel) {
+      hasRearPlanePanel = true;
+    }
+  }
+
+  if (verticalSidePanels.length >= 2) {
+    const xs = verticalSidePanels.map((p) => p.x);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const maxSideHeight = Math.max(...verticalSidePanels.map((p) => p.height));
+    const maxSideTopY = Math.max(...verticalSidePanels.map((p) => p.topY));
+    const shelfLikeTiers = allParts.filter((p, idx) =>
+      partTokenLists[idx].some((t) => t === "shelf" || t === "tier")
+    );
+
+    if (maxX - minX > 0 && (shelfLikeTiers.length >= 2 || horizontalTiers.length >= 3)) {
+      const hasGeometricTop = horizontalTiers.some(
+        (t) => t.topY >= maxSideTopY - maxSideHeight * 0.12
+      );
+      if (!hasNamedTopClosure && !hasGeometricTop) {
+        errors.push(
+          "Incomplete enclosure build: opposing vertical side panels and tiers are missing a top closure panel."
+        );
+      }
+      if (!hasNamedRearClosure && !hasRearPlanePanel) {
+        errors.push(
+          "Incomplete enclosure build: opposing vertical side panels and tiers are missing a back panel."
+        );
+      }
+    }
   }
 
   return errors;

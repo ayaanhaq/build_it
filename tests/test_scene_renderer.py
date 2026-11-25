@@ -112,6 +112,14 @@ class SceneRendererTests(unittest.TestCase):
             "removeStep failed to cleanly undo and remove step meshes",
         )
 
+    def test_camera_target_raises_for_tall_model_and_preserves_desk(self):
+        ct = self.comparison.get("cameraTargetCheck", {})
+        self.assertTrue(ct.get("valid"), f"Camera target check failed: {ct}")
+        self.assertAlmostEqual(ct.get("bookcaseTargetY"), 90.0, places=4)
+        self.assertAlmostEqual(ct.get("unnamedTargetY"), 90.0, places=4)
+        self.assertEqual(ct.get("deskStep1TargetY"), 18)
+        self.assertEqual(ct.get("deskFullTargetY"), 18)
+
 
 if __name__ == "__main__":
     unittest.main()

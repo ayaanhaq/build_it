@@ -70,6 +70,14 @@ class GenerateServerTests(unittest.TestCase):
         res = self.data["portEnvOverrideRespected"]
         self.assertTrue(res["valid"])
 
+    def test_failed_steps_write_sanitized_failure_log(self):
+        res = self.data["failedStepsWriteSanitizedFailureLog"]
+        self.assertEqual(res["fileCount"], 1)
+        self.assertEqual(res["attemptNumbers"], [0, 1, 2, 3])
+        self.assertFalse(res["containsKey"])
+        self.assertFalse(res["containsHeader"])
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

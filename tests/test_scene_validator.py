@@ -492,6 +492,132 @@ class SceneStepValidatorTests(unittest.TestCase):
         self.assertIn(expected, errors)
 
 
+class SceneCompletenessTests(unittest.TestCase):
+    def _base_bookcase_steps(self, include_back: bool) -> list[dict]:
+        steps = [
+            {
+                "stepNumber": 1,
+                "title": "Side Panels",
+                "description": "Stand the side panels, top panel, bottom panel, shelves, and back panel frame.",
+                "parts": [
+                    {
+                        "id": "side_left",
+                        "name": "Left Side Panel",
+                        "primitive": "box",
+                        "dimensions": {"width": 1.8, "height": 180.0, "depth": 30.0},
+                        "position": {"x": 0.9, "y": 90.0, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 1,
+                        "qty": 1,
+                    },
+                    {
+                        "id": "side_right",
+                        "name": "Right Side Panel",
+                        "primitive": "box",
+                        "dimensions": {"width": 1.8, "height": 180.0, "depth": 30.0},
+                        "position": {"x": 79.1, "y": 90.0, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 1,
+                        "qty": 1,
+                    },
+                ],
+            },
+            {
+                "stepNumber": 2,
+                "title": "Top, Bottom, and Shelves",
+                "parts": [
+                    {
+                        "id": "bottom_panel",
+                        "name": "Bottom Panel",
+                        "primitive": "box",
+                        "dimensions": {"width": 76.4, "height": 1.8, "depth": 30.0},
+                        "position": {"x": 40.0, "y": 0.9, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 2,
+                        "qty": 1,
+                    },
+                    {
+                        "id": "top_panel",
+                        "name": "Top Panel",
+                        "primitive": "box",
+                        "dimensions": {"width": 76.4, "height": 1.8, "depth": 30.0},
+                        "position": {"x": 40.0, "y": 179.1, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 2,
+                        "qty": 1,
+                    },
+                    {
+                        "id": "shelf_1",
+                        "name": "Shelf 1",
+                        "primitive": "box",
+                        "dimensions": {"width": 76.4, "height": 1.8, "depth": 30.0},
+                        "position": {"x": 40.0, "y": 60.0, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 2,
+                        "qty": 1,
+                    },
+                    {
+                        "id": "shelf_2",
+                        "name": "Shelf 2",
+                        "primitive": "box",
+                        "dimensions": {"width": 76.4, "height": 1.8, "depth": 30.0},
+                        "position": {"x": 40.0, "y": 120.0, "z": 15.0},
+                        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        "color": "brown",
+                        "material": "oak",
+                        "step": 2,
+                        "qty": 1,
+                    },
+                ],
+            },
+        ]
+        if include_back:
+            steps.append(
+                {
+                    "stepNumber": 3,
+                    "title": "Attach Back Panel",
+                    "parts": [
+                        {
+                            "id": "back_panel",
+                            "name": "Back Panel",
+                            "primitive": "box",
+                            "dimensions": {"width": 76.4, "height": 176.4, "depth": 0.5},
+                            "position": {"x": 40.0, "y": 90.0, "z": 29.75},
+                            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "color": "brown",
+                            "material": "oak",
+                            "step": 3,
+                            "qty": 1,
+                        }
+                    ],
+                }
+            )
+        return steps
+
+    def test_scene_missing_back_panel_rejected(self):
+        scene = {"schemaVersion": 1, "steps": self._base_bookcase_steps(include_back=False)}
+        errors = run_validator(scene)
+        self.assertTrue(
+            any("back panel" in err.lower() for err in errors),
+            f"Expected missing back panel completeness error, got: {errors}",
+        )
+
+    def test_complete_scene_passes(self):
+        scene = {"schemaVersion": 1, "steps": self._base_bookcase_steps(include_back=True)}
+        errors = run_validator(scene)
+        self.assertEqual(errors, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

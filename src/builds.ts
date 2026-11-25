@@ -57,30 +57,42 @@ function getIconType(part: ScenePart): DeskPart["iconType"] {
   return "accessory";
 }
 
+const DESK_SCENE_STEPS = new Set<SceneStep>(DESK_SCENE.steps);
+
 /**
  * Formats dimensions of a ScenePart into a human-readable string.
  */
-function formatDimensions(primitive: string, dim: Record<string, any>): string {
+function formatDimensions(
+  primitive: string,
+  dim: Record<string, any>,
+  unitLabel: string
+): string {
+  const unitSuffix = unitLabel ? ` ${unitLabel}` : "";
   if (primitive === "box" || primitive === "bevel") {
-    return `${dim.width} × ${dim.height} × ${dim.depth} mm`;
+    return `${dim.width} × ${dim.height} × ${dim.depth}${unitSuffix}`;
   }
   if (primitive === "cylinder") {
     const r = dim.radiusTop ?? dim.radiusBottom ?? dim.radius ?? 0;
-    return `Ø${r * 2} × ${dim.height} mm`;
+    return `Ø${r * 2} × ${dim.height}${unitSuffix}`;
   }
   if (primitive === "lathe") {
-    return `Ø${dim.radius * 2} × ${dim.height} mm`;
+    return `Ø${dim.radius * 2} × ${dim.height}${unitSuffix}`;
   }
   if (primitive === "spring") {
-    return `Ø${dim.radius * 2} × ${dim.height} mm`;
+    return `Ø${dim.radius * 2} × ${dim.height}${unitSuffix}`;
   }
   return "N/A";
 }
 
 /**
  * Converts a validated SceneStep into a BuildStep for 2D UI display components.
+ * Generated scenes render in centimeter viewer units ("cm"), while the hand-built
+ * DESK_SCENE fixture keeps its existing "mm" display label.
  */
-export function sceneStepToBuildStep(sceneStep: SceneStep): BuildStep {
+export function sceneStepToBuildStep(
+  sceneStep: SceneStep,
+  unitLabel: string = DESK_SCENE_STEPS.has(sceneStep) ? "mm" : "cm"
+): BuildStep {
   return {
     stepNumber: sceneStep.stepNumber,
     title: sceneStep.title,
@@ -96,7 +108,7 @@ export function sceneStepToBuildStep(sceneStep: SceneStep): BuildStep {
         id: p.id,
         name: p.name || p.id,
         qty: `${p.qty}×`,
-        dimensions: formatDimensions(p.primitive, p.dimensions),
+        dimensions: formatDimensions(p.primitive, p.dimensions, unitLabel),
         material: p.material,
         color: hex,
         iconType: getIconType(p),
