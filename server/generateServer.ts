@@ -3,7 +3,8 @@
  *
  * Binds to 127.0.0.1 only (port 8787 by default, override via PORT).
  * Accepts POST /api/generate with { "request": string } (1..500 chars trimmed),
- * runs buildPrompt/generateScene via GeminiModelClient, and streams SSE events:
+ * runs buildPrompt/generateScene via the configured LLM provider (gemini or groq),
+ * and streams SSE events:
  *   - event: step  -> validated SceneStep JSON
  *   - event: done  -> { complete: true, stepCount }
  *   - event: error -> { message, complete: false, stepCount }
@@ -25,9 +26,13 @@ import {
 } from "../src/generatePipeline.ts";
 import { PRIMITIVE_BOUNDS } from "../src/sceneValidator.ts";
 import {
-  GeminiClientError,
-  GeminiModelClient,
-} from "../src/model/geminiClient.ts";
+  createProviderModelClient,
+  getEnvSecretsForRedaction,
+  getProviderEnvSpec,
+  isProviderClientError,
+  resolveLlmProvider,
+  type LlmProvider,
+} from "../src/model/provider.ts";
 import type { SceneStep } from "../src/types.ts";
 
 export const DEFAULT_HOST = "127.0.0.1";
@@ -38,7 +43,11 @@ export const MAX_BODY_BYTES = 16 * 1024;
 
 export interface GenerateServerDependencies {
   env?: Record<string, string | undefined>;
-  clientFactory?: (options: { apiKey: string; model?: string }) => ModelClient;
+  clientFactory?: (options: {
+    provider: LlmProvider;
+    apiKey: string;
+    model?: string;
+  }) => ModelClient;
   schema?: unknown;
   port?: number;
 }
@@ -73,15 +82,25 @@ export function parsePort(
   return parsed;
 }
 
-export function redactSecret(text: string, secret?: string): string {
+export function redactSecret(text: string, secret?: string | string[]): string {
   if (!secret) {
     return text;
   }
-  return text.split(secret).join("[REDACTED]");
+  const secrets = Array.isArray(secret) ? secret : [secret];
+  let clean = text;
+  for (const item of secrets) {
+    if (item) {
+      clean = clean.split(item).join("[REDACTED]");
+    }
+  }
+  return clean;
 }
 
-function redactValue(value: unknown, secret?: string): unknown {
+function redactValue(value: unknown, secret?: string | string[]): unknown {
   if (!secret) {
+    return value;
+  }
+  if (Array.isArray(secret) && secret.length === 0) {
     return value;
   }
   if (typeof value === "string") {
@@ -103,7 +122,7 @@ function redactValue(value: unknown, secret?: string): unknown {
 export function formatSseEvent(
   eventName: string,
   data: unknown,
-  secret?: string
+  secret?: string | string[]
 ): string {
   const safeData = redactValue(data, secret);
   const serialized = redactSecret(JSON.stringify(safeData), secret);
@@ -114,7 +133,7 @@ function sendJson(
   res: ServerResponse,
   status: number,
   payload: unknown,
-  secret?: string
+  secret?: string | string[]
 ): void {
   const safePayload = redactValue(payload, secret);
   const body = redactSecret(JSON.stringify(safePayload), secret);
@@ -198,14 +217,16 @@ export function createGenerateServer(
   deps: GenerateServerDependencies = {}
 ): Server {
   const env = deps.env ?? process.env;
+  const provider = resolveLlmProvider(env);
+  const providerSpec = getProviderEnvSpec(provider);
   const schema = deps.schema ?? loadSceneSchema();
   let isGenerating = false;
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const apiKeyForRedaction = env.GEMINI_API_KEY?.trim();
+    const secretsForRedaction = getEnvSecretsForRedaction(env);
 
     if (!applyCors(req, res)) {
-      sendJson(res, 403, { error: "Origin not allowed." }, apiKeyForRedaction);
+      sendJson(res, 403, { error: "Origin not allowed." }, secretsForRedaction);
       return;
     }
 
@@ -213,12 +234,12 @@ export function createGenerateServer(
     try {
       pathname = new URL(req.url ?? "/", `http://${DEFAULT_HOST}`).pathname;
     } catch {
-      sendJson(res, 400, { error: "Invalid request URL." }, apiKeyForRedaction);
+      sendJson(res, 400, { error: "Invalid request URL." }, secretsForRedaction);
       return;
     }
 
     if (pathname !== "/api/generate") {
-      sendJson(res, 404, { error: "Not found." }, apiKeyForRedaction);
+      sendJson(res, 404, { error: "Not found." }, secretsForRedaction);
       return;
     }
 
@@ -233,7 +254,7 @@ export function createGenerateServer(
 
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST, OPTIONS");
-      sendJson(res, 405, { error: "Method not allowed." }, apiKeyForRedaction);
+      sendJson(res, 405, { error: "Method not allowed." }, secretsForRedaction);
       return;
     }
 
@@ -242,7 +263,7 @@ export function createGenerateServer(
         res,
         429,
         { error: "A generation is already in progress. Please try again later." },
-        apiKeyForRedaction
+        secretsForRedaction
       );
       return;
     }
@@ -254,15 +275,15 @@ export function createGenerateServer(
       const status = err instanceof HttpRequestError ? err.status : 400;
       const msg =
         err instanceof Error ? err.message : "Invalid request payload.";
-      sendJson(res, status, { error: msg }, apiKeyForRedaction);
+      sendJson(res, status, { error: msg }, secretsForRedaction);
       return;
     }
 
-    const apiKey = env.GEMINI_API_KEY?.trim();
+    const apiKey = env[providerSpec.apiKeyEnvVar]?.trim();
     if (!apiKey) {
       sendJson(res, 500, {
-        error: "Server configuration error: GEMINI_API_KEY is missing.",
-      });
+        error: `Server configuration error: ${providerSpec.apiKeyEnvVar} is missing.`,
+      }, secretsForRedaction);
       return;
     }
 
@@ -271,13 +292,13 @@ export function createGenerateServer(
         res,
         429,
         { error: "A generation is already in progress. Please try again later." },
-        apiKey
+        secretsForRedaction
       );
       return;
     }
 
     isGenerating = true;
-    const model = env.GEMINI_MODEL?.trim() || undefined;
+    const model = env[providerSpec.modelEnvVar]?.trim() || undefined;
 
     let clientDisconnected = false;
     const abortError = new Error("Client disconnected.");
@@ -303,8 +324,8 @@ export function createGenerateServer(
     res.flushHeaders?.();
 
     const baseClient: ModelClient = deps.clientFactory
-      ? deps.clientFactory({ apiKey, model })
-      : new GeminiModelClient({ apiKey, model });
+      ? deps.clientFactory({ provider, apiKey, model })
+      : createProviderModelClient({ provider, apiKey, model });
 
     const guardedClient: ModelClient = {
       async *generateStream(prompt: string): AsyncIterable<string> {
@@ -364,7 +385,7 @@ export function createGenerateServer(
           if (status === "valid" && step) {
             stepCount++;
             if (!clientDisconnected && !res.writableEnded) {
-              res.write(formatSseEvent("step", step, apiKey));
+              res.write(formatSseEvent("step", step, secretsForRedaction));
             }
           }
         },
@@ -377,13 +398,13 @@ export function createGenerateServer(
       if (!result.success) {
         const errMsg = redactSecret(
           result.error ?? "Generation failed validation.",
-          apiKey
+          secretsForRedaction
         );
         res.write(
           formatSseEvent(
             "error",
             { message: errMsg, complete: false, stepCount },
-            apiKey
+            secretsForRedaction
           )
         );
         res.end();
@@ -399,7 +420,7 @@ export function createGenerateServer(
               complete: false,
               stepCount: 0,
             },
-            apiKey
+            secretsForRedaction
           )
         );
         res.end();
@@ -407,23 +428,26 @@ export function createGenerateServer(
       }
 
       res.write(
-        formatSseEvent("done", { complete: true, stepCount }, apiKey)
+        formatSseEvent(
+          "done",
+          { complete: true, stepCount },
+          secretsForRedaction
+        )
       );
       res.end();
     } catch (err: unknown) {
       if (!clientDisconnected && !res.writableEnded) {
-        const rawMsg =
-          err instanceof GeminiClientError
+        const rawMsg = isProviderClientError(err)
+          ? err.message
+          : err instanceof Error
             ? err.message
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        const safeMsg = redactSecret(rawMsg, apiKey);
+            : String(err);
+        const safeMsg = redactSecret(rawMsg, secretsForRedaction);
         res.write(
           formatSseEvent(
             "error",
             { message: safeMsg, complete: false, stepCount },
-            apiKey
+            secretsForRedaction
           )
         );
         res.end();

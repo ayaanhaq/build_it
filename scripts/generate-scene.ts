@@ -1,8 +1,9 @@
 /**
- * CLI runner for end-to-end streaming 3D scene generation via GeminiModelClient.
+ * CLI runner for end-to-end streaming 3D scene generation via the configured LLM provider.
  *
  * Usage:
  *   GEMINI_API_KEY=... node --experimental-strip-types scripts/generate-scene.ts "build a 4-shelf bookcase"
+ *   LLM_PROVIDER=groq GROQ_API_KEY=... node --experimental-strip-types scripts/generate-scene.ts --debug "build a 4-shelf bookcase"
  *   GEMINI_API_KEY=... node --experimental-strip-types scripts/generate-scene.ts --save out.json --debug "build a 4-shelf bookcase"
  *   node --experimental-strip-types scripts/generate-scene.ts --dry-run "build a 4-shelf bookcase"
  */
@@ -18,7 +19,14 @@ import {
 } from "../src/generatePipeline.ts";
 import { PRIMITIVE_BOUNDS } from "../src/sceneValidator.ts";
 import type { SceneStep } from "../src/types.ts";
-import { GeminiModelClient, GeminiClientError } from "../src/model/geminiClient.ts";
+import {
+  createProviderModelClient,
+  getEnvSecretsForRedaction,
+  getProviderEnvSpec,
+  isProviderClientError,
+  resolveLlmProvider,
+  type LlmProvider,
+} from "../src/model/provider.ts";
 
 export interface ParsedCliArgs {
   dryRun: boolean;
@@ -81,11 +89,18 @@ function loadSceneSchema(): unknown {
   return JSON.parse(readFileSync(schemaUrl, "utf8"));
 }
 
-function redactSecret(text: string, secret?: string): string {
+function redactSecret(text: string, secret?: string | string[]): string {
   if (!secret) {
     return text;
   }
-  return text.split(secret).join("[REDACTED]");
+  const secrets = Array.isArray(secret) ? secret : [secret];
+  let clean = text;
+  for (const item of secrets) {
+    if (item) {
+      clean = clean.split(item).join("[REDACTED]");
+    }
+  }
+  return clean;
 }
 
 function wrapDebugClient(
@@ -111,7 +126,11 @@ export interface SavedSceneOutput {
   rawOutput?: string;
 }
 
-function writeSaveFile(savePath: string, payload: SavedSceneOutput, apiKey?: string): void {
+function writeSaveFile(
+  savePath: string,
+  payload: SavedSceneOutput,
+  apiKey?: string | string[]
+): void {
   mkdirSync(dirname(savePath), { recursive: true });
   const serialized = redactSecret(JSON.stringify(payload, null, 2) + "\n", apiKey);
   writeFileSync(savePath, serialized, "utf8");
@@ -121,7 +140,10 @@ export interface CliRuntimeDeps {
   env?: Record<string, string | undefined>;
   stdout?: { write: (text: string) => void };
   stderr?: { write: (text: string) => void };
-  clientFactory?: (apiKey: string) => ModelClient;
+  clientFactory?: (
+    apiKey: string,
+    options?: { provider: LlmProvider; model?: string }
+  ) => ModelClient;
 }
 
 export async function runCli(
@@ -146,6 +168,14 @@ export async function runCli(
     return 1;
   }
 
+  let provider: LlmProvider;
+  try {
+    provider = resolveLlmProvider(env);
+  } catch (err: any) {
+    stderr.write(`Error: ${err?.message ?? String(err)}\n`);
+    return 1;
+  }
+
   const schema = loadSceneSchema();
 
   if (parsed.dryRun) {
@@ -159,22 +189,25 @@ export async function runCli(
     return 0;
   }
 
-  const apiKey = env.GEMINI_API_KEY?.trim();
+  const providerSpec = getProviderEnvSpec(provider);
+  const apiKey = env[providerSpec.apiKeyEnvVar]?.trim();
+  const secretsForRedaction = getEnvSecretsForRedaction(env);
   if (!apiKey) {
     stderr.write(
-      "Error: Missing GEMINI_API_KEY environment variable. Set GEMINI_API_KEY or pass --dry-run.\n"
+      `Error: Missing ${providerSpec.apiKeyEnvVar} environment variable. Set ${providerSpec.apiKeyEnvVar} or pass --dry-run.\n`
     );
     return 1;
   }
 
+  const model = env[providerSpec.modelEnvVar]?.trim() || undefined;
   const baseClient = deps.clientFactory
-    ? deps.clientFactory(apiKey)
-    : new GeminiModelClient({ apiKey });
+    ? deps.clientFactory(apiKey, { provider, model })
+    : createProviderModelClient({ provider, apiKey, model });
 
   const rawChunks: string[] = [];
   const client: ModelClient = parsed.debug
     ? wrapDebugClient(baseClient, (chunk) => {
-        const sanitized = redactSecret(chunk, apiKey);
+        const sanitized = redactSecret(chunk, secretsForRedaction);
         rawChunks.push(sanitized);
         stderr.write(sanitized);
       })
@@ -193,12 +226,12 @@ export async function runCli(
       steps: collectedSteps,
     };
     if (error) {
-      payload.error = redactSecret(error, apiKey);
+      payload.error = redactSecret(error, secretsForRedaction);
     }
     if (parsed.debug) {
-      payload.rawOutput = redactSecret(rawChunks.join(""), apiKey);
+      payload.rawOutput = redactSecret(rawChunks.join(""), secretsForRedaction);
     }
-    writeSaveFile(parsed.savePath, payload, apiKey);
+    writeSaveFile(parsed.savePath, payload, secretsForRedaction);
   };
 
   try {
@@ -207,7 +240,9 @@ export async function runCli(
       onStep: (step, status) => {
         if (status === "valid" && step) {
           collectedSteps.push(step);
-          stdout.write(redactSecret(JSON.stringify(step) + "\n", apiKey));
+          stdout.write(
+            redactSecret(JSON.stringify(step) + "\n", secretsForRedaction)
+          );
         }
       },
     });
@@ -215,7 +250,7 @@ export async function runCli(
     if (!result.success) {
       const errMsg = redactSecret(
         result.error ?? "Unknown validation error",
-        apiKey
+        secretsForRedaction
       );
       saveResult(false, errMsg);
       stderr.write(`Generation failed: ${errMsg}\n`);
@@ -232,11 +267,10 @@ export async function runCli(
     saveResult(true);
     return 0;
   } catch (err: any) {
-    const rawMsg =
-      err instanceof GeminiClientError
-        ? err.message
-        : err?.message ?? String(err);
-    const safeMsg = redactSecret(String(rawMsg), apiKey);
+    const rawMsg = isProviderClientError(err)
+      ? err.message
+      : err?.message ?? String(err);
+    const safeMsg = redactSecret(String(rawMsg), secretsForRedaction);
     saveResult(false, safeMsg);
     stderr.write(`Error: ${safeMsg}\n`);
     return 1;
