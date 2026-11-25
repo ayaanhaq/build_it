@@ -43,6 +43,7 @@ const testResults = {
   promptDoesNotAskForCentimeters: {},
   clampDistanceLowFor180CmModel: {},
   distanceUnchangedWhenWithinBounds: {},
+  missingCameraPresetSetsDefaults: {},
   deskFixtureDistancesUntouched: {},
   passed: true,
 };
@@ -1031,7 +1032,73 @@ async function runTests() {
   };
   if (!testResults.distanceUnchangedWhenWithinBounds.valid) testResults.passed = false;
 
-  // 28. Desk fixture distances are never modified
+  // 28. Missing cameraPreset (or missing distance) fills default phi=1.0, theta=0.6 and clamped distance
+  const missingPreset180Stream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'No Preset 180cm',
+      parts: [
+        {
+          id: 'panel_no_preset_180',
+          name: 'Panel 180cm',
+          primitive: 'box',
+          dimensions: { width: 800, height: 1800, depth: 20 },
+          position: { x: 0, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const missingPreset100Stream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'No Preset 100cm',
+      parts: [
+        {
+          id: 'panel_no_preset_100',
+          name: 'Panel 100cm',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const resNoPreset180 = await generateScene(
+    '180cm no preset',
+    new FakeModelClient([missingPreset180Stream])
+  );
+  const resNoPreset100 = await generateScene(
+    '100cm no preset',
+    new FakeModelClient([missingPreset100Stream])
+  );
+  const preset180 = resNoPreset180.steps[0]?.cameraPreset;
+  const preset100 = resNoPreset100.steps[0]?.cameraPreset;
+  testResults.missingCameraPresetSetsDefaults = {
+    preset180,
+    preset100,
+    valid:
+      resNoPreset180.success === true &&
+      resNoPreset100.success === true &&
+      preset180?.distance === 288 &&
+      preset180?.phi === 1.0 &&
+      preset180?.theta === 0.6 &&
+      preset100?.distance === 160 &&
+      preset100?.phi === 1.0 &&
+      preset100?.theta === 0.6,
+  };
+  if (!testResults.missingCameraPresetSetsDefaults.valid) testResults.passed = false;
+
+  // 29. Desk fixture distances are never modified
   const deskDistances = DESK_SCENE.steps.map((s) => s.cameraPreset?.distance);
   const expectedDeskDistances = [90, 85, 95, 100, 75, 88];
   testResults.deskFixtureDistancesUntouched = {

@@ -223,6 +223,12 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertEqual(res["distOverMaxClamped"], 400)
         self.assertTrue(res["valid"])
 
+    def test_missing_camera_preset_sets_defaults_and_distance(self):
+        res = self.data["missingCameraPresetSetsDefaults"]
+        self.assertEqual(res["preset180"], {"distance": 288, "phi": 1.0, "theta": 0.6})
+        self.assertEqual(res["preset100"], {"distance": 160, "phi": 1.0, "theta": 0.6})
+        self.assertTrue(res["valid"])
+
     def test_desk_fixture_distances_untouched(self):
         res = self.data["deskFixtureDistancesUntouched"]
         self.assertEqual(res["deskDistances"], res["expectedDeskDistances"])

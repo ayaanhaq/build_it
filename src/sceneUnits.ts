@@ -24,7 +24,10 @@ type CameraPreset = SceneStep["cameraPreset"];
 export const MM_PER_VIEWER_UNIT = 10;
 
 export const MIN_CAMERA_DISTANCE_EXTENT_FACTOR = 1.6;
+export const MIN_CAMERA_DISTANCE = MIN_CAMERA_DISTANCE_EXTENT_FACTOR * 1;
 export const MAX_CAMERA_DISTANCE = 400;
+export const DEFAULT_CAMERA_PHI = 1.0;
+export const DEFAULT_CAMERA_THETA = 0.6;
 
 const NON_SPATIAL_DIMENSION_KEYS = new Set([
   "radialSegments",
@@ -290,26 +293,48 @@ export function normalizeStepToViewerUnits(
       : rawStep.parts,
   };
 
-  if (
-    normalizedStep.cameraPreset &&
-    typeof normalizedStep.cameraPreset.distance === "number" &&
-    Number.isFinite(normalizedStep.cameraPreset.distance)
-  ) {
-    const largestDim = computeLargestExtentForSteps([
-      ...previousNormalizedSteps,
-      normalizedStep,
-    ]);
-    const minDistance =
-      largestDim > 0 ? MIN_CAMERA_DISTANCE_EXTENT_FACTOR * largestDim : 0;
-    const clampedDistance = Math.min(
-      MAX_CAMERA_DISTANCE,
-      Math.max(minDistance, normalizedStep.cameraPreset.distance)
-    );
-    normalizedStep.cameraPreset = {
-      ...normalizedStep.cameraPreset,
-      distance: clampedDistance,
-    };
-  }
+  const largestDim = computeLargestExtentForSteps([
+    ...previousNormalizedSteps,
+    normalizedStep,
+  ]);
+  const computedTargetDistance = Math.min(
+    MAX_CAMERA_DISTANCE,
+    Math.max(
+      MIN_CAMERA_DISTANCE,
+      MIN_CAMERA_DISTANCE_EXTENT_FACTOR * largestDim
+    )
+  );
+
+  const rawPreset = normalizedStep.cameraPreset;
+  const hasDistance =
+    rawPreset !== undefined &&
+    rawPreset !== null &&
+    typeof rawPreset.distance === "number" &&
+    Number.isFinite(rawPreset.distance);
+  const hasPhi =
+    rawPreset !== undefined &&
+    rawPreset !== null &&
+    typeof rawPreset.phi === "number" &&
+    Number.isFinite(rawPreset.phi);
+  const hasTheta =
+    rawPreset !== undefined &&
+    rawPreset !== null &&
+    typeof rawPreset.theta === "number" &&
+    Number.isFinite(rawPreset.theta);
+
+  const clampedDistance = hasDistance
+    ? Math.min(
+        MAX_CAMERA_DISTANCE,
+        Math.max(computedTargetDistance, rawPreset.distance)
+      )
+    : computedTargetDistance;
+
+  normalizedStep.cameraPreset = {
+    ...(rawPreset && typeof rawPreset === "object" ? rawPreset : {}),
+    distance: clampedDistance,
+    phi: hasPhi ? rawPreset.phi : DEFAULT_CAMERA_PHI,
+    theta: hasTheta ? rawPreset.theta : DEFAULT_CAMERA_THETA,
+  };
 
   return normalizedStep;
 }
