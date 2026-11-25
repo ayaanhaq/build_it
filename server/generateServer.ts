@@ -24,6 +24,8 @@ import {
   buildPrompt,
   generateScene,
   type ModelClient,
+  type ModelGenerateOptions,
+  type ModelStreamMetadata,
 } from "../src/generatePipeline.ts";
 import { PRIMITIVE_BOUNDS } from "../src/sceneValidator.ts";
 import {
@@ -56,6 +58,9 @@ export interface GenerateServerDependencies {
 
 export interface FailedStepAttemptLog {
   attempt: number;
+  finishReason: string | null;
+  streamError: string | null;
+  maxTokens?: number;
   errors: string[];
   rawText: string;
 }
@@ -81,6 +86,11 @@ function writeFailedStepLog(
     error: redactSecret(errorMessage, secrets),
     attempts: attempts.map((entry) => ({
       attempt: entry.attempt,
+      finishReason: entry.finishReason ?? null,
+      streamError: entry.streamError
+        ? redactSecret(entry.streamError, secrets)
+        : null,
+      ...(entry.maxTokens !== undefined ? { maxTokens: entry.maxTokens } : {}),
       errors: entry.errors.map((e) => redactSecret(e, secrets)),
       rawText: redactSecret(entry.rawText, secrets),
     })),
@@ -370,25 +380,45 @@ export function createGenerateServer(
       : createProviderModelClient({ provider, apiKey, model });
 
     const streamChunksByCall: string[][] = [];
+    const streamMetaByCall: ModelStreamMetadata[] = [];
     let currentRetryAttempt = 0;
     let failedAttempts: FailedStepAttemptLog[] = [];
 
     const guardedClient: ModelClient = {
-      async *generateStream(prompt: string): AsyncIterable<string> {
+      async *generateStream(
+        prompt: string,
+        genOptions?: ModelGenerateOptions
+      ): AsyncIterable<string> {
         if (clientDisconnected) {
           throw abortError;
         }
 
         const chunkBucket: string[] = [];
-        const bucketIdx =
-          currentRetryAttempt === 0 ? 0 : streamChunksByCall.length;
-        if (currentRetryAttempt === 0) {
-          streamChunksByCall[0] = chunkBucket;
-        } else {
-          streamChunksByCall[bucketIdx] = chunkBucket;
-        }
+        const bucketIdx = streamChunksByCall.length;
+        streamChunksByCall[bucketIdx] = chunkBucket;
+        const metaEntry: ModelStreamMetadata = {
+          maxTokens: genOptions?.maxTokens,
+        };
+        streamMetaByCall[bucketIdx] = metaEntry;
 
-        const innerStream = baseClient.generateStream(prompt);
+        const innerStream = baseClient.generateStream(prompt, {
+          ...genOptions,
+          onMetadata: (meta) => {
+            if (meta.finishReason !== undefined) {
+              metaEntry.finishReason = meta.finishReason;
+            }
+            if (meta.streamError !== undefined) {
+              metaEntry.streamError = redactSecret(
+                meta.streamError,
+                secretsForRedaction
+              );
+            }
+            if (meta.maxTokens !== undefined) {
+              metaEntry.maxTokens = meta.maxTokens;
+            }
+            genOptions?.onMetadata?.(meta);
+          },
+        });
         const asyncIterFn = (innerStream as AsyncIterable<string>)[
           Symbol.asyncIterator
         ];
@@ -420,6 +450,21 @@ export function createGenerateServer(
             }
             yield next.value;
           }
+        } catch (streamErr: unknown) {
+          const msg =
+            streamErr instanceof Error ? streamErr.message : String(streamErr);
+          metaEntry.streamError = redactSecret(msg, secretsForRedaction);
+          if (
+            streamErr &&
+            typeof streamErr === "object" &&
+            typeof (streamErr as { finishReason?: unknown }).finishReason ===
+              "string"
+          ) {
+            metaEntry.finishReason = (
+              streamErr as { finishReason: string }
+            ).finishReason;
+          }
+          throw streamErr;
         } finally {
           if (clientDisconnected) {
             try {
@@ -452,15 +497,17 @@ export function createGenerateServer(
               res.write(formatSseEvent("step", step, secretsForRedaction));
             }
           } else if (status === "invalid") {
-            const rawChunks =
-              currentRetryAttempt === 0
-                ? streamChunksByCall[0] ?? []
-                : streamChunksByCall[streamChunksByCall.length - 1] ?? [];
+            const callIdx = Math.max(0, streamChunksByCall.length - 1);
+            const rawChunks = streamChunksByCall[callIdx] ?? [];
+            const meta = streamMetaByCall[callIdx] ?? {};
             if (currentRetryAttempt === 0) {
               failedAttempts = [];
             }
             failedAttempts.push({
               attempt: currentRetryAttempt,
+              finishReason: meta.finishReason ?? null,
+              streamError: meta.streamError ?? null,
+              maxTokens: meta.maxTokens,
               errors: (errors ?? []).map((e) =>
                 redactSecret(e, secretsForRedaction)
               ),

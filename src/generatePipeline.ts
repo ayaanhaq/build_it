@@ -19,17 +19,35 @@ import {
 } from "./sceneUnits.ts";
 import { REAL_TONES } from "./three-scene.ts";
 
+export interface ModelStreamMetadata {
+  finishReason?: string;
+  streamError?: string;
+  maxTokens?: number;
+}
+
+export interface ModelGenerateOptions {
+  maxTokens?: number;
+  responseFormat?: Record<string, unknown>;
+  onMetadata?: (meta: ModelStreamMetadata) => void;
+}
+
 /**
  * Streaming model client interface.
  * Returns an async or synchronous stream of raw text chunks given a prompt.
  */
 export interface ModelClient {
-  generateStream(prompt: string): AsyncIterable<string> | Iterable<string>;
+  generateStream(
+    prompt: string,
+    options?: ModelGenerateOptions
+  ): AsyncIterable<string> | Iterable<string>;
 }
 
 export type FakeChunkSource =
   | string[]
-  | ((prompt: string) => string[] | AsyncIterable<string> | Iterable<string>);
+  | ((
+      prompt: string,
+      options?: ModelGenerateOptions
+    ) => string[] | AsyncIterable<string> | Iterable<string>);
 
 /**
  * FakeModelClient for unit and integration testing.
@@ -38,6 +56,7 @@ export type FakeChunkSource =
 export class FakeModelClient implements ModelClient {
   private responses: FakeChunkSource[];
   public recordedPrompts: string[] = [];
+  public recordedOptions: (ModelGenerateOptions | undefined)[] = [];
 
   constructor(responses: FakeChunkSource[] | FakeChunkSource) {
     if (Array.isArray(responses) && responses.length > 0 && (Array.isArray(responses[0]) || typeof responses[0] === "function")) {
@@ -47,14 +66,18 @@ export class FakeModelClient implements ModelClient {
     }
   }
 
-  async *generateStream(prompt: string): AsyncIterable<string> {
+  async *generateStream(
+    prompt: string,
+    options?: ModelGenerateOptions
+  ): AsyncIterable<string> {
     this.recordedPrompts.push(prompt);
+    this.recordedOptions.push(options);
     const resp = this.responses.shift();
     if (!resp) {
       return;
     }
     if (typeof resp === "function") {
-      const generated = resp(prompt);
+      const generated = resp(prompt, options);
       for await (const chunk of generated) {
         yield chunk;
       }
@@ -384,6 +407,79 @@ export async function* parseStreamedSteps(
  * Default maximum retry attempts permitted per invalid step.
  */
 export const DEFAULT_MAX_RETRIES_PER_STEP = 3;
+export const DEFAULT_INITIAL_MAX_TOKENS = 8192;
+export const MAX_COMPLETION_TOKENS_CAP = 65536;
+
+export function isIncompleteOutputError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const candidate = err as { code?: unknown; name?: unknown; message?: unknown };
+  if (
+    candidate.code === "incomplete_output" ||
+    candidate.name === "IncompleteOutputError"
+  ) {
+    return true;
+  }
+  if (
+    typeof candidate.message === "string" &&
+    candidate.message.toLowerCase().includes("incomplete_output")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isUnclosedJsonErrorMessage(message?: string): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return lower.includes("unclosed json object") || lower.includes("incomplete_output");
+}
+
+function validateRetryStepShape(step: unknown): string[] {
+  if (!step || typeof step !== "object" || Array.isArray(step)) {
+    return ["Retry response must be a complete SceneStep JSON object."];
+  }
+  const obj = step as Partial<SceneStep>;
+  const errors: string[] = [];
+  if (typeof obj.stepNumber !== "number" || !Number.isFinite(obj.stepNumber) || obj.stepNumber < 1) {
+    errors.push(`Retry step missing required positive integer 'stepNumber'.`);
+  }
+  if (typeof obj.title !== "string" || obj.title.trim() === "") {
+    errors.push(`Retry step missing required non-empty string 'title'.`);
+  }
+  if (!Array.isArray(obj.parts) || obj.parts.length === 0) {
+    errors.push(`Retry step missing non-empty 'parts' array.`);
+  } else {
+    obj.parts.forEach((p, idx) => {
+      if (!p || typeof p !== "object" || typeof (p as any).id !== "string" || (p as any).id.trim() === "") {
+        errors.push(`Retry step parts[${idx}] missing required non-empty string 'id'.`);
+      }
+    });
+  }
+  return errors;
+}
+
+function buildStepResponseFormat(schema: unknown): Record<string, unknown> | undefined {
+  if (!schema || typeof schema !== "object") {
+    return undefined;
+  }
+  const rec = schema as { definitions?: { SceneStep?: Record<string, unknown> } };
+  if (!rec.definitions?.SceneStep) {
+    return undefined;
+  }
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: "scene_step",
+      strict: false,
+      schema: {
+        ...rec.definitions.SceneStep,
+        definitions: rec.definitions,
+      },
+    },
+  };
+}
 
 export interface LoggedRetry {
   stepNumber: number;
@@ -395,13 +491,37 @@ export interface LoggedRetry {
 export interface RetryPromptInput {
   originalRequest: string;
   stepNumber: number;
+  stepTitle?: string;
   invalidStep?: unknown;
   errors: string[];
   previousSteps: SceneStep[];
+  schema?: unknown;
 }
 
+const CONCRETE_STEP_EXAMPLE = {
+  stepNumber: 2,
+  title: "Attach Bottom Panel",
+  description: "Fasten the bottom panel between the left and right side panels.",
+  cameraPreset: { distance: 2000, phi: 1.0, theta: 0.6 },
+  parts: [
+    {
+      id: "bottom_panel",
+      name: "Bottom Panel",
+      primitive: "box",
+      dimensions: { width: 800, height: 20, depth: 300 },
+      position: { x: 0, y: 10, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      color: "tan",
+      material: "oak",
+      step: 2,
+      qty: 1,
+    },
+  ],
+};
+
 /**
- * Builds a targeted retry prompt containing the exact validator error messages.
+ * Builds a targeted retry prompt restating exact step number, title, already-used part IDs,
+ * schema definition, concrete example, and exact validator error messages.
  */
 export function buildRetryPrompt(input: RetryPromptInput): string {
   const errorsFormatted = input.errors.map((e) => `  - ${e}`).join("\n");
@@ -409,18 +529,54 @@ export function buildRetryPrompt(input: RetryPromptInput): string {
     ? JSON.stringify(input.invalidStep, null, 2)
     : "(Unparseable JSON)";
 
-  return [
-    `Step ${input.stepNumber} failed validation with the following errors:`,
+  const titleFromInvalid =
+    input.invalidStep &&
+    typeof input.invalidStep === "object" &&
+    typeof (input.invalidStep as { title?: unknown }).title === "string" &&
+    (input.invalidStep as { title: string }).title.trim() !== ""
+      ? (input.invalidStep as { title: string }).title.trim()
+      : undefined;
+  const resolvedTitle = input.stepTitle ?? titleFromInvalid ?? `Step ${input.stepNumber}`;
+
+  const usedIds: string[] = [];
+  for (const prev of input.previousSteps) {
+    if (Array.isArray(prev.parts)) {
+      for (const p of prev.parts) {
+        if (p && typeof p.id === "string" && !usedIds.includes(p.id)) {
+          usedIds.push(p.id);
+        }
+      }
+    }
+  }
+  const usedIdsText = usedIds.length > 0 ? usedIds.join(", ") : "(none)";
+
+  const lines = [
+    `step ${input.stepNumber} failed validation with the following errors:`,
     errorsFormatted,
     "",
     `Original Request: ${input.originalRequest}`,
+    `Required stepNumber: ${input.stepNumber}`,
+    `Required step title: ${resolvedTitle}`,
+    `Part IDs already used in earlier steps (do NOT reuse these): ${usedIdsText}`,
     "",
     "Invalid step input received:",
     invalidJson,
+  ];
+
+  if (input.schema && Object.keys(input.schema as object).length > 0) {
+    lines.push("", "=== TARGET SCHEMA ===", JSON.stringify(input.schema, null, 2));
+  }
+
+  lines.push(
     "",
-    `Please correct the step to satisfy all schema and dimension rules.`,
-    `Output ONLY the corrected Step ${input.stepNumber} as a single JSON line.`,
-  ].join("\n");
+    "=== EXAMPLE VALID STEP OBJECT ===",
+    JSON.stringify(CONCRETE_STEP_EXAMPLE, null, 2),
+    "",
+    "Ensure the object includes stepNumber, title, and a non-empty parts array where every part includes id, primitive, dimensions, position, rotation, color, material, step, and qty.",
+    `Return one complete JSON step object for step ${input.stepNumber}, nothing else.`
+  );
+
+  return lines.join("\n");
 }
 
 export interface GenerateSceneOptions {
@@ -463,10 +619,12 @@ export async function generateScene(
   const validationBounds = convertPrimitiveBoundsToViewerUnits(primitiveTable);
   const paletteNames = options.paletteNames ?? ALLOWED_PALETTE_NAMES;
   const schema = options.schema ?? {};
+  const retryResponseFormat = buildStepResponseFormat(schema);
 
   const validSteps: SceneStep[] = [];
   const retriesLogged: LoggedRetry[] = [];
   const seenPartIds = new Set<string>();
+  const completedStepNumbers = new Set<number>();
 
   // Model input is in millimeters (matching the schema and prompt);
   // divide once by MM_PER_VIEWER_UNIT (10) and clamp cameraPreset.distance using cumulative visible steps.
@@ -474,106 +632,220 @@ export async function generateScene(
     normalizeStepToViewerUnits(rawStep, validSteps);
 
   const initialPrompt = buildPrompt(request, schema, primitiveTable, paletteNames);
-  const stream = client.generateStream(initialPrompt);
+  let initialMaxTokens = DEFAULT_INITIAL_MAX_TOKENS;
 
-  for await (const item of parseStreamedSteps(stream)) {
-    let stepToValidate = item.step ? normalizeParsedStep(item.step) : undefined;
-    let isValid = false;
-    let validationErrors: string[] = [];
+  for (let streamAttempt = 0; streamAttempt <= maxRetries; streamAttempt++) {
+    let hitIncompleteStream = false;
+    let incompleteReason = "incomplete_output: Model stream ended mid-object.";
 
-    if (item.error) {
-      validationErrors = [item.error];
-    } else if (stepToValidate) {
-      validationErrors = validateStep(stepToValidate, {
-        seenPartIds,
-        primitiveTable: validationBounds,
-        unitLabel: "cm",
+    try {
+      const stream = client.generateStream(initialPrompt, {
+        maxTokens: initialMaxTokens,
       });
-      if (validationErrors.length === 0) {
-        isValid = true;
-        validSteps.push(stepToValidate);
-        options.onStep?.(stepToValidate, "valid");
-      }
-    }
 
-    if (!isValid) {
-      options.onStep?.(stepToValidate, "invalid", validationErrors);
-
-      let attempt = 0;
-      let resolved = false;
-
-      while (attempt < maxRetries) {
-        attempt++;
-        const stepNum =
-          (stepToValidate && typeof stepToValidate.stepNumber === "number")
-            ? stepToValidate.stepNumber
-            : validSteps.length + 1;
-
-        const retryPrompt = buildRetryPrompt({
-          originalRequest: request,
-          stepNumber: stepNum,
-          invalidStep: stepToValidate,
-          errors: validationErrors,
-          previousSteps: validSteps,
-        });
-
-        retriesLogged.push({
-          stepNumber: stepNum,
-          attempt,
-          errors: [...validationErrors],
-          retryPrompt,
-        });
-
-        options.onRetry?.(stepNum, attempt, validationErrors, retryPrompt);
-
-        // Request retry generation from model client
-        let retriedStep: SceneStep | undefined = undefined;
-        let retryError: string | undefined = undefined;
-
-        for await (const retryItem of parseStreamedSteps(client.generateStream(retryPrompt))) {
-          if (retryItem.error) {
-            retryError = retryItem.error;
-          } else if (retryItem.step) {
-            retriedStep = normalizeParsedStep(retryItem.step);
-            break;
-          }
+      for await (const item of parseStreamedSteps(stream)) {
+        if (
+          item.step &&
+          typeof item.step.stepNumber === "number" &&
+          completedStepNumbers.has(item.step.stepNumber)
+        ) {
+          continue;
         }
 
-        if (retryError && !retriedStep) {
-          validationErrors = [retryError];
-          options.onStep?.(undefined, "invalid", validationErrors);
-        } else if (retriedStep) {
-          stepToValidate = retriedStep;
-          validationErrors = validateStep(retriedStep, {
+        if (item.error && isUnclosedJsonErrorMessage(item.error)) {
+          hitIncompleteStream = true;
+          incompleteReason = item.error;
+          break;
+        }
+
+        let stepToValidate = item.step
+          ? normalizeParsedStep(item.step)
+          : undefined;
+        let isValid = false;
+        let validationErrors: string[] = [];
+
+        if (item.error) {
+          validationErrors = [item.error];
+        } else if (stepToValidate) {
+          validationErrors = validateStep(stepToValidate, {
             seenPartIds,
             primitiveTable: validationBounds,
             unitLabel: "cm",
           });
           if (validationErrors.length === 0) {
-            resolved = true;
-            validSteps.push(retriedStep);
-            options.onStep?.(retriedStep, "valid");
-            break;
-          } else {
-            options.onStep?.(retriedStep, "invalid", validationErrors);
+            isValid = true;
+            validSteps.push(stepToValidate);
+            completedStepNumbers.add(stepToValidate.stepNumber);
+            options.onStep?.(stepToValidate, "valid");
+          }
+        }
+
+        if (!isValid) {
+          options.onStep?.(stepToValidate, "invalid", validationErrors);
+
+          let attempt = 0;
+          let resolved = false;
+          let stepRetryMaxTokens = initialMaxTokens;
+          const targetStepNum =
+            stepToValidate && typeof stepToValidate.stepNumber === "number"
+              ? stepToValidate.stepNumber
+              : validSteps.length + 1;
+          const targetStepTitle =
+            stepToValidate &&
+            typeof stepToValidate.title === "string" &&
+            stepToValidate.title.trim() !== ""
+              ? stepToValidate.title
+              : undefined;
+
+          let useSameRetryPrompt = false;
+          let lastRetryPrompt = "";
+
+          while (attempt < maxRetries) {
+            attempt++;
+
+            const retryPrompt =
+              useSameRetryPrompt && lastRetryPrompt
+                ? lastRetryPrompt
+                : buildRetryPrompt({
+                    originalRequest: request,
+                    stepNumber: targetStepNum,
+                    stepTitle: targetStepTitle,
+                    invalidStep: stepToValidate,
+                    errors: validationErrors,
+                    previousSteps: validSteps,
+                    schema,
+                  });
+            lastRetryPrompt = retryPrompt;
+            useSameRetryPrompt = false;
+
+            retriesLogged.push({
+              stepNumber: targetStepNum,
+              attempt,
+              errors: [...validationErrors],
+              retryPrompt,
+            });
+
+            options.onRetry?.(targetStepNum, attempt, validationErrors, retryPrompt);
+
+            let retriedStep: SceneStep | undefined = undefined;
+            let retryError: string | undefined = undefined;
+            let retryIncomplete = false;
+
+            try {
+              for await (const retryItem of parseStreamedSteps(
+                client.generateStream(retryPrompt, {
+                  maxTokens: stepRetryMaxTokens,
+                  responseFormat: retryResponseFormat,
+                })
+              )) {
+                if (retryItem.error) {
+                  retryError = retryItem.error;
+                  if (isUnclosedJsonErrorMessage(retryItem.error)) {
+                    retryIncomplete = true;
+                  }
+                } else if (retryItem.step) {
+                  retriedStep = normalizeParsedStep(retryItem.step);
+                  break;
+                }
+              }
+            } catch (retryStreamErr: unknown) {
+              if (isIncompleteOutputError(retryStreamErr)) {
+                retryIncomplete = true;
+                retryError =
+                  retryStreamErr instanceof Error
+                    ? retryStreamErr.message
+                    : "incomplete_output";
+              } else {
+                throw retryStreamErr;
+              }
+            }
+
+            if (retryIncomplete && !retriedStep) {
+              validationErrors = [retryError ?? "incomplete_output"];
+              options.onStep?.(undefined, "invalid", validationErrors);
+              stepRetryMaxTokens = Math.min(
+                MAX_COMPLETION_TOKENS_CAP,
+                stepRetryMaxTokens * 2
+              );
+              useSameRetryPrompt = true;
+              continue;
+            }
+
+            if (retryError && !retriedStep) {
+              validationErrors = [retryError];
+              options.onStep?.(undefined, "invalid", validationErrors);
+            } else if (retriedStep) {
+              stepToValidate = retriedStep;
+              const shapeErrors = validateRetryStepShape(retriedStep);
+              if (shapeErrors.length > 0) {
+                validationErrors = shapeErrors;
+                options.onStep?.(retriedStep, "invalid", validationErrors);
+                continue;
+              }
+              validationErrors = validateStep(retriedStep, {
+                seenPartIds,
+                primitiveTable: validationBounds,
+                unitLabel: "cm",
+              });
+              if (validationErrors.length === 0) {
+                resolved = true;
+                validSteps.push(retriedStep);
+                completedStepNumbers.add(retriedStep.stepNumber);
+                options.onStep?.(retriedStep, "valid");
+                break;
+              } else {
+                options.onStep?.(retriedStep, "invalid", validationErrors);
+              }
+            } else {
+              validationErrors = ["Retry produced an empty response."];
+              options.onStep?.(undefined, "invalid", validationErrors);
+            }
+          }
+
+          if (!resolved) {
+            return {
+              success: false,
+              steps: validSteps,
+              error: `Step ${targetStepNum} failed validation after ${maxRetries} retries: ${validationErrors.join("; ")}`,
+              retriesLogged,
+            };
           }
         }
       }
-
-      if (!resolved) {
-        const stepNum =
-          (stepToValidate && typeof stepToValidate.stepNumber === "number")
-            ? stepToValidate.stepNumber
-            : validSteps.length + 1;
-
-        return {
-          success: false,
-          steps: validSteps,
-          error: `Step ${stepNum} failed validation after ${maxRetries} retries: ${validationErrors.join("; ")}`,
-          retriesLogged,
-        };
+    } catch (streamErr: unknown) {
+      if (isIncompleteOutputError(streamErr)) {
+        hitIncompleteStream = true;
+        incompleteReason =
+          streamErr instanceof Error ? streamErr.message : "incomplete_output";
+      } else {
+        throw streamErr;
       }
     }
+
+    if (!hitIncompleteStream) {
+      break;
+    }
+
+    const nextStepNum = validSteps.length + 1;
+    options.onStep?.(undefined, "invalid", [incompleteReason]);
+
+    if (streamAttempt >= maxRetries) {
+      return {
+        success: false,
+        steps: validSteps,
+        error: `Step ${nextStepNum} failed with incomplete_output after ${maxRetries} retries: ${incompleteReason}`,
+        retriesLogged,
+      };
+    }
+
+    initialMaxTokens = Math.min(MAX_COMPLETION_TOKENS_CAP, initialMaxTokens * 2);
+    retriesLogged.push({
+      stepNumber: nextStepNum,
+      attempt: streamAttempt + 1,
+      errors: [incompleteReason],
+      retryPrompt: initialPrompt,
+    });
+    options.onRetry?.(nextStepNum, streamAttempt + 1, [incompleteReason], initialPrompt);
   }
 
   if (validSteps.length > 0) {

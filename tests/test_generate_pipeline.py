@@ -234,6 +234,32 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertEqual(res["deskDistances"], res["expectedDeskDistances"])
         self.assertTrue(res["valid"])
 
+    def test_retry_prompt_has_step_2_and_used_part_ids(self):
+        res = self.data["retryPromptHasStep2AndUsedPartIds"]
+        self.assertTrue(res["hasStep2"])
+        self.assertTrue(res["hasTitle"])
+        self.assertTrue(res["hasUsedIds"])
+        self.assertTrue(res["hasSchema"])
+        self.assertTrue(res["hasReturnDirective"])
+        self.assertTrue(res["valid"])
+
+    def test_incomplete_output_retries_with_same_request_and_higher_tokens(self):
+        res = self.data["incompleteOutputRetriesWithSameRequestAndHigherTokens"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertTrue(res["samePromptReused"])
+        self.assertEqual(res["secondMaxTokens"], res["firstMaxTokens"] * 2)
+        self.assertTrue(res["valid"])
+
+    def test_retry_missing_shape_rejected_before_validator(self):
+        res = self.data["retryMissingShapeRejectedBeforeValidator"]
+        self.assertTrue(res["success"])
+        self.assertEqual(res["stepCount"], 2)
+        self.assertEqual(res["retriesCount"], 2)
+        self.assertTrue(res["secondRetrySawShapeError"])
+        self.assertTrue(res["retryUsedResponseFormat"])
+        self.assertTrue(res["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

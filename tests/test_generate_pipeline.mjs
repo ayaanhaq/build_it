@@ -1,9 +1,11 @@
 import {
   FakeModelClient,
   buildPrompt,
+  buildRetryPrompt,
   parseStreamedSteps,
   generateScene,
   DEFAULT_MAX_RETRIES_PER_STEP,
+  DEFAULT_INITIAL_MAX_TOKENS,
   ALLOWED_PALETTE_NAMES,
 } from '../src/generatePipeline.ts';
 import { PRIMITIVE_BOUNDS } from '../src/sceneValidator.ts';
@@ -45,6 +47,9 @@ const testResults = {
   distanceUnchangedWhenWithinBounds: {},
   missingCameraPresetSetsDefaults: {},
   deskFixtureDistancesUntouched: {},
+  retryPromptHasStep2AndUsedPartIds: {},
+  incompleteOutputRetriesWithSameRequestAndHigherTokens: {},
+  retryMissingShapeRejectedBeforeValidator: {},
   passed: true,
 };
 
@@ -1107,6 +1112,170 @@ async function runTests() {
     valid: JSON.stringify(deskDistances) === JSON.stringify(expectedDeskDistances),
   };
   if (!testResults.deskFixtureDistancesUntouched.valid) testResults.passed = false;
+
+  // 30. Retry prompt for step 2 contains "step 2", step title, used part IDs, schema, and concrete example
+  const retryPromptStep2 = buildRetryPrompt({
+    originalRequest: 'build a 4-shelf bookcase',
+    stepNumber: 2,
+    stepTitle: 'Attach Shelves',
+    invalidStep: { stepNumber: 2, parts: [] },
+    errors: ["Retry step missing non-empty 'parts' array."],
+    previousSteps: [
+      JSON.parse(
+        JSON.stringify({
+          stepNumber: 1,
+          title: 'Side Panels',
+          parts: [
+            {
+              id: 'left_side_panel',
+              name: 'Left',
+              primitive: 'box',
+              dimensions: { width: 2, height: 180, depth: 30 },
+              position: { x: -39, y: 90, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 },
+              color: 'tan',
+              material: 'oak',
+              step: 1,
+              qty: 1,
+            },
+            {
+              id: 'right_side_panel',
+              name: 'Right',
+              primitive: 'box',
+              dimensions: { width: 2, height: 180, depth: 30 },
+              position: { x: 39, y: 90, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 },
+              color: 'tan',
+              material: 'oak',
+              step: 1,
+              qty: 1,
+            },
+          ],
+        })
+      ),
+    ],
+    schema: dummySchema,
+  });
+  testResults.retryPromptHasStep2AndUsedPartIds = {
+    hasStep2: retryPromptStep2.includes('step 2'),
+    hasTitle: retryPromptStep2.includes('Attach Shelves'),
+    hasUsedIds:
+      retryPromptStep2.includes('left_side_panel') &&
+      retryPromptStep2.includes('right_side_panel'),
+    hasSchema: retryPromptStep2.includes('schemaVersion'),
+    hasReturnDirective: retryPromptStep2.includes(
+      'Return one complete JSON step object for step 2, nothing else.'
+    ),
+    valid:
+      retryPromptStep2.includes('step 2') &&
+      retryPromptStep2.includes('Attach Shelves') &&
+      retryPromptStep2.includes('left_side_panel') &&
+      retryPromptStep2.includes('right_side_panel') &&
+      retryPromptStep2.includes('schemaVersion') &&
+      retryPromptStep2.includes('EXAMPLE VALID STEP OBJECT') &&
+      retryPromptStep2.includes(
+        'Return one complete JSON step object for step 2, nothing else.'
+      ),
+  };
+  if (!testResults.retryPromptHasStep2AndUsedPartIds.valid) testResults.passed = false;
+
+  // 31. incomplete_output error retries with the SAME initial request and higher maxTokens (doubled)
+  let incompleteCallIdx = 0;
+  const incompleteMockClient = new FakeModelClient([
+    () => {
+      incompleteCallIdx++;
+      async function* gen() {
+        yield '{"stepNumber":1,"title":"Side","parts":[{"id":"side_l"';
+        const err = new Error('incomplete_output: finish_reason=length');
+        err.code = 'incomplete_output';
+        err.finishReason = 'length';
+        throw err;
+      }
+      return gen();
+    },
+    [makeStepJson(1) + '\n', makeStepJson(2) + '\n'],
+  ]);
+  const resIncompleteRetry = await generateScene(
+    'incomplete stream test',
+    incompleteMockClient
+  );
+  testResults.incompleteOutputRetriesWithSameRequestAndHigherTokens = {
+    success: resIncompleteRetry.success,
+    stepCount: resIncompleteRetry.steps.length,
+    samePromptReused:
+      incompleteMockClient.recordedPrompts.length === 2 &&
+      incompleteMockClient.recordedPrompts[0] ===
+        incompleteMockClient.recordedPrompts[1],
+    firstMaxTokens: incompleteMockClient.recordedOptions[0]?.maxTokens,
+    secondMaxTokens: incompleteMockClient.recordedOptions[1]?.maxTokens,
+    valid:
+      resIncompleteRetry.success === true &&
+      resIncompleteRetry.steps.length === 2 &&
+      incompleteMockClient.recordedPrompts[0] ===
+        incompleteMockClient.recordedPrompts[1] &&
+      incompleteMockClient.recordedOptions[0]?.maxTokens ===
+        DEFAULT_INITIAL_MAX_TOKENS &&
+      incompleteMockClient.recordedOptions[1]?.maxTokens ===
+        DEFAULT_INITIAL_MAX_TOKENS * 2,
+  };
+  if (!testResults.incompleteOutputRetriesWithSameRequestAndHigherTokens.valid) {
+    testResults.passed = false;
+  }
+
+  // 32. Retry response missing stepNumber/title/parts/id is rejected before validator and retried
+  const shapeRetryClient = new FakeModelClient([
+    [
+      makeStepJson(1) + '\n',
+      JSON.stringify({
+        stepNumber: 2,
+        title: 'Bad Step 2',
+        parts: [
+          {
+            id: 'bad_w_2',
+            primitive: 'box',
+            dimensions: { width: 9999, height: 20, depth: 20 },
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            color: 'tan',
+            material: 'oak',
+            step: 2,
+            qty: 1,
+          },
+        ],
+      }) + '\n',
+    ],
+    // Retry 1 missing parts/stepNumber/title -> rejected by shape gate
+    [JSON.stringify({ step: 2, description: 'incomplete shape' }) + '\n'],
+    // Retry 2 valid
+    [makeStepJson(2) + '\n'],
+  ]);
+  const resShapeGate = await generateScene('shape gate test', shapeRetryClient, {
+    schema: { definitions: { SceneStep: { type: 'object' } } },
+  });
+  testResults.retryMissingShapeRejectedBeforeValidator = {
+    success: resShapeGate.success,
+    stepCount: resShapeGate.steps.length,
+    retriesCount: resShapeGate.retriesLogged.length,
+    secondRetrySawShapeError: resShapeGate.retriesLogged[1]?.errors?.some((e) =>
+      e.includes('Retry step missing')
+    ),
+    retryUsedResponseFormat: Boolean(
+      shapeRetryClient.recordedOptions[1]?.responseFormat
+    ),
+    valid:
+      resShapeGate.success === true &&
+      resShapeGate.steps.length === 2 &&
+      resShapeGate.retriesLogged.length === 2 &&
+      Boolean(
+        resShapeGate.retriesLogged[1]?.errors?.some((e) =>
+          e.includes('Retry step missing')
+        )
+      ) &&
+      Boolean(shapeRetryClient.recordedOptions[1]?.responseFormat),
+  };
+  if (!testResults.retryMissingShapeRejectedBeforeValidator.valid) {
+    testResults.passed = false;
+  }
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }

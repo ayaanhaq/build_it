@@ -419,8 +419,18 @@ async function runTests() {
       env: { GEMINI_API_KEY: fakeKey },
       clientFactory: () =>
         new FakeModelClient([
-          [makeStepJson(1) + "\n", badStep2Attempt0],
-          [badStep2Attempt1],
+          (_prompt, opts) => {
+            opts?.onMetadata?.({ finishReason: "stop", maxTokens: opts?.maxTokens });
+            return [makeStepJson(1) + "\n", badStep2Attempt0];
+          },
+          (_prompt, opts) => {
+            opts?.onMetadata?.({
+              finishReason: "length",
+              streamError: `trunc ${fakeKey}`,
+              maxTokens: opts?.maxTokens,
+            });
+            return [badStep2Attempt1];
+          },
           [badStep2Attempt2],
           [badStep2Attempt3],
         ]),
@@ -457,11 +467,16 @@ async function runTests() {
         attempts[3]?.attempt === 3 &&
         attempts.every(
           (a) =>
+            "finishReason" in a &&
+            "streamError" in a &&
             Array.isArray(a.errors) &&
             a.errors.length > 0 &&
             typeof a.rawText === "string" &&
             a.rawText.length > 0
         ) &&
+        attempts[0].finishReason === "stop" &&
+        attempts[1].finishReason === "length" &&
+        attempts[1].streamError === "trunc [REDACTED]" &&
         attempts[0].rawText.includes("Attempt 0 ([REDACTED])") &&
         attempts[1].rawText.includes("invalid_r1") &&
         attempts[3].rawText.includes("invalid_r3") &&

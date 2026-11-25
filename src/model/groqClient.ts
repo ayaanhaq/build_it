@@ -3,13 +3,19 @@
  *
  * Implements ModelClient over Groq's OpenAI-compatible /openai/v1/chat/completions
  * SSE endpoint using Node's/browser's global fetch without external SDK dependencies.
+ *
+ * Token budget note: reasoning models such as openai/gpt-oss-120b spend reasoning
+ * tokens out of max_completion_tokens before emitting content. Setting
+ * DEFAULT_GROQ_MAX_TOKENS = 8192 guarantees sufficient headroom for a full step
+ * (and multi-step NDJSON builds) while staying well below the 65,536 model limit.
  */
 
-import type { ModelClient } from "../generatePipeline.ts";
+import type { ModelClient, ModelGenerateOptions } from "../generatePipeline.ts";
 
 export const GROQ_CHAT_COMPLETIONS_URL =
   "https://api.groq.com/openai/v1/chat/completions";
 export const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
+export const DEFAULT_GROQ_MAX_TOKENS = 8192;
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const DEFAULT_MAX_RETRIES = 2;
 export const INITIAL_RETRY_DELAY_MS = 1_000;
@@ -25,19 +31,37 @@ export interface GroqClientOptions {
   fetch?: FetchLike;
   timeoutMs?: number;
   maxRetries?: number;
+  maxTokens?: number;
 }
 
+export type GroqErrorCode =
+  | "incomplete_output"
+  | "api_error"
+  | "timeout"
+  | "network_error";
+
 /**
- * Error thrown by GroqModelClient containing a short safe message and optional HTTP status.
+ * Error thrown by GroqModelClient containing a short safe message, optional HTTP status,
+ * error classification code ("incomplete_output", etc.), and optional finishReason.
  * Never contains API keys, Bearer tokens, or full request URLs.
  */
 export class GroqClientError extends Error {
   public readonly status?: number;
+  public readonly code?: GroqErrorCode;
+  public readonly finishReason?: string;
 
-  constructor(message: string, status?: number) {
+  constructor(
+    message: string,
+    status?: number,
+    code?: GroqErrorCode,
+    finishReason?: string
+  ) {
     super(message);
-    this.name = "GroqClientError";
+    this.name =
+      code === "incomplete_output" ? "IncompleteOutputError" : "GroqClientError";
     this.status = status;
+    this.code = code;
+    this.finishReason = finishReason;
   }
 }
 
@@ -103,7 +127,7 @@ function sleep(ms: number): Promise<void> {
 function extractGroqSseTexts(
   payload: string,
   apiKey: string = ""
-): { texts: string[]; done: boolean } {
+): { texts: string[]; done: boolean; finishReason?: string } {
   const trimmed = payload.trim();
   if (!trimmed) {
     return { texts: [], done: false };
@@ -130,15 +154,25 @@ function extractGroqSseTexts(
       typeof parsed.error.message === "string"
         ? parsed.error.message
         : "Groq API returned a stream error.";
-    throw new GroqClientError(sanitizeErrorDetail(msg, apiKey), code);
+    throw new GroqClientError(sanitizeErrorDetail(msg, apiKey), code, "api_error");
   }
 
-  const deltaContent = parsed?.choices?.[0]?.delta?.content;
+  const choice = parsed?.choices?.[0];
+  const finishReason =
+    typeof choice?.finish_reason === "string" && choice.finish_reason.length > 0
+      ? choice.finish_reason
+      : undefined;
+  const deltaContent = choice?.delta?.content;
   if (typeof deltaContent === "string" && deltaContent.length > 0) {
-    return { texts: [deltaContent], done: false };
+    return { texts: [deltaContent], done: false, finishReason };
   }
 
-  return { texts: [], done: false };
+  return { texts: [], done: false, finishReason };
+}
+
+export interface GroqSseParseCallbacks {
+  onDone?: () => void;
+  onFinishReason?: (finishReason: string) => void;
 }
 
 /**
@@ -148,15 +182,20 @@ function extractGroqSseTexts(
 export async function* parseGroqSseText(
   chunks: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
   apiKey: string = "",
-  onDone?: () => void
+  callbacksOrOnDone?: (() => void) | GroqSseParseCallbacks
 ): AsyncGenerator<string, void, unknown> {
+  const callbacks: GroqSseParseCallbacks =
+    typeof callbacksOrOnDone === "function"
+      ? { onDone: callbacksOrOnDone }
+      : callbacksOrOnDone ?? {};
+
   const decoder = new TextDecoder();
   let buffer = "";
   let dataLines: string[] = [];
 
   const handleLine = (
     rawLine: string
-  ): { texts: string[]; done: boolean } => {
+  ): { texts: string[]; done: boolean; finishReason?: string } => {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (line === "") {
       if (dataLines.length === 0) {
@@ -190,12 +229,15 @@ export async function* parseGroqSseText(
     while (newlineIndex !== -1) {
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      const { texts, done } = handleLine(line);
+      const { texts, done, finishReason } = handleLine(line);
+      if (finishReason) {
+        callbacks.onFinishReason?.(finishReason);
+      }
       for (const text of texts) {
         yield text;
       }
       if (done) {
-        onDone?.();
+        callbacks.onDone?.();
         return;
       }
       newlineIndex = buffer.indexOf("\n");
@@ -208,13 +250,16 @@ export async function* parseGroqSseText(
   }
 
   if (buffer.length > 0) {
-    const { texts, done } = handleLine(buffer);
+    const { texts, done, finishReason } = handleLine(buffer);
     buffer = "";
+    if (finishReason) {
+      callbacks.onFinishReason?.(finishReason);
+    }
     for (const text of texts) {
       yield text;
     }
     if (done) {
-      onDone?.();
+      callbacks.onDone?.();
       return;
     }
   }
@@ -222,13 +267,17 @@ export async function* parseGroqSseText(
   if (dataLines.length > 0) {
     const payload = dataLines.join("\n");
     dataLines = [];
-    const { texts } = extractGroqSseTexts(payload, apiKey);
+    const { texts, done, finishReason } = extractGroqSseTexts(payload, apiKey);
+    if (finishReason) {
+      callbacks.onFinishReason?.(finishReason);
+    }
     for (const text of texts) {
       yield text;
     }
+    if (done) {
+      callbacks.onDone?.();
+    }
   }
-
-  onDone?.();
 }
 
 async function* readBodyChunks(
@@ -261,6 +310,39 @@ async function* readBodyChunks(
   }
 }
 
+class BraceTracker {
+  public depth = 0;
+  public inString = false;
+  public escaped = false;
+
+  feed(chunk: string): void {
+    for (let i = 0; i < chunk.length; i++) {
+      const ch = chunk[i];
+      if (this.inString) {
+        if (this.escaped) {
+          this.escaped = false;
+        } else if (ch === "\\") {
+          this.escaped = true;
+        } else if (ch === '"') {
+          this.inString = false;
+        }
+      } else {
+        if (ch === '"') {
+          this.inString = true;
+        } else if (ch === "{") {
+          this.depth++;
+        } else if (ch === "}" && this.depth > 0) {
+          this.depth--;
+        }
+      }
+    }
+  }
+
+  isMidObject(): boolean {
+    return this.depth > 0 || this.inString;
+  }
+}
+
 /**
  * GroqModelClient streams text from the Groq Chat Completions API using fetch + SSE.
  */
@@ -270,6 +352,7 @@ export class GroqModelClient implements ModelClient {
   private readonly fetchFn: FetchLike;
   public readonly timeoutMs: number;
   public readonly maxRetries: number;
+  public readonly maxTokens: number;
 
   constructor(options: GroqClientOptions) {
     if (
@@ -289,26 +372,37 @@ export class GroqModelClient implements ModelClient {
     this.fetchFn = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.maxTokens = options.maxTokens ?? DEFAULT_GROQ_MAX_TOKENS;
   }
 
-  async *generateStream(prompt: string): AsyncIterable<string> {
+  async *generateStream(
+    prompt: string,
+    generateOptions?: ModelGenerateOptions
+  ): AsyncIterable<string> {
     if (!this.apiKey) {
       throw new GroqClientError("Groq API key is required.");
     }
 
-    // Never pass response_format: { type: "json_object" }; the pipeline streams
-    // multiple step objects in sequence rather than one top-level JSON object.
-    const requestBody = JSON.stringify({
+    const maxCompletionTokens = generateOptions?.maxTokens ?? this.maxTokens;
+    const payloadObj: Record<string, unknown> = {
       model: this.model,
       messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: maxCompletionTokens,
       stream: true,
-    });
+    };
+    if (generateOptions?.responseFormat) {
+      payloadObj.response_format = generateOptions.responseFormat;
+    }
+    const requestBody = JSON.stringify(payloadObj);
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       const controller = new AbortController();
       let timedOut = false;
       let streamStarted = false;
-      let streamFinished = false;
+      let sawDoneSentinel = false;
+      let lastFinishReason: string | undefined;
+      let capturedStreamError: string | undefined;
+      const braceTracker = new BraceTracker();
 
       const timeoutId = setTimeout(() => {
         timedOut = true;
@@ -347,43 +441,75 @@ export class GroqModelClient implements ModelClient {
 
           throw new GroqClientError(
             `Groq API request failed with HTTP ${response.status}.`,
-            response.status
+            response.status,
+            "api_error"
           );
         }
 
         if (!response.body) {
           throw new GroqClientError(
             "Groq API response contained no stream body.",
-            response.status
+            response.status,
+            "incomplete_output"
           );
         }
 
         streamStarted = true;
         const chunks = readBodyChunks(response.body, () => {
-          if (!streamFinished && !controller.signal.aborted) {
+          if (!sawDoneSentinel && !controller.signal.aborted) {
             controller.abort();
           }
         });
 
-        for await (const text of parseGroqSseText(chunks, this.apiKey, () => {
-          streamFinished = true;
+        for await (const text of parseGroqSseText(chunks, this.apiKey, {
+          onDone: () => {
+            sawDoneSentinel = true;
+          },
+          onFinishReason: (reason) => {
+            lastFinishReason = reason;
+          },
         })) {
+          braceTracker.feed(text);
           yield text;
         }
 
-        streamFinished = true;
+        if (lastFinishReason === "length") {
+          throw new GroqClientError(
+            "incomplete_output: Groq response stopped due to finish_reason=length.",
+            undefined,
+            "incomplete_output",
+            "length"
+          );
+        }
+
+        if (braceTracker.isMidObject() || !sawDoneSentinel) {
+          const detail = braceTracker.isMidObject()
+            ? "stream ended mid-object"
+            : "stream ended without data: [DONE]";
+          throw new GroqClientError(
+            `incomplete_output: Groq ${detail}.`,
+            undefined,
+            "incomplete_output",
+            lastFinishReason
+          );
+        }
+
         return;
       } catch (err: any) {
         if (err instanceof GroqClientError) {
+          const sanitized = sanitizeErrorDetail(err.message, this.apiKey);
+          capturedStreamError = sanitized;
           throw new GroqClientError(
-            sanitizeErrorDetail(err.message, this.apiKey),
-            err.status
+            sanitized,
+            err.status,
+            err.code,
+            err.finishReason ?? lastFinishReason
           );
         }
         if (timedOut) {
-          throw new GroqClientError(
-            `Groq API request timed out after ${this.timeoutMs}ms.`
-          );
+          const timeoutMsg = `Groq API request timed out after ${this.timeoutMs}ms.`;
+          capturedStreamError = timeoutMsg;
+          throw new GroqClientError(timeoutMsg, undefined, "timeout", lastFinishReason);
         }
         const rawDetail =
           err && typeof err.message === "string"
@@ -393,12 +519,17 @@ export class GroqModelClient implements ModelClient {
         const prefix = streamStarted
           ? "Groq API stream error"
           : "Groq API request failed";
-        throw new GroqClientError(
-          safeDetail ? `${prefix}: ${safeDetail}` : `${prefix}.`
-        );
+        const fullMsg = safeDetail ? `${prefix}: ${safeDetail}` : `${prefix}.`;
+        capturedStreamError = fullMsg;
+        throw new GroqClientError(fullMsg, undefined, "network_error", lastFinishReason);
       } finally {
         clearTimeout(timeoutId);
-        if (!streamFinished && !controller.signal.aborted) {
+        generateOptions?.onMetadata?.({
+          finishReason: lastFinishReason,
+          streamError: capturedStreamError,
+          maxTokens: maxCompletionTokens,
+        });
+        if (!sawDoneSentinel && !controller.signal.aborted) {
           controller.abort();
         }
       }
