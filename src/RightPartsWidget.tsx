@@ -44,7 +44,8 @@ export const RightPartsWidget: React.FC<RightPartsWidgetProps> = ({
     );
   }
 
-  const progressPercent = Math.round((currentStep / totalSteps) * 100);
+  const progressPercent =
+    totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0;
 
   return (
     <aside className="fixed inset-y-0 right-0 z-40 w-80 md:w-88 bg-[#121316]/95 backdrop-blur-xl border-l border-white/10 flex flex-col justify-between p-4 shadow-2xl transition-all">
