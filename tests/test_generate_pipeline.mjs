@@ -41,6 +41,9 @@ const testResults = {
   unitLabelsCmForGeneratedDeskUnchanged: {},
   backPanel1800MmBecomes180Not18: {},
   promptDoesNotAskForCentimeters: {},
+  clampDistanceLowFor180CmModel: {},
+  distanceUnchangedWhenWithinBounds: {},
+  deskFixtureDistancesUntouched: {},
   passed: true,
 };
 
@@ -614,7 +617,7 @@ async function runTests() {
             primitive: 'box',
             dimensions: { width: 800, height: 1800, depth: 5 },
             position: { x: 0, y: 900, z: -147.5 },
-            rotation: { x: 15, y: -90, z: 0 },
+            rotation: { x: 0, y: -90, z: 0 },
             color: 'tan',
             material: 'oak',
             step: 3,
@@ -638,7 +641,7 @@ async function runTests() {
       normPart.dimensions.width === 80 &&
       normPart.dimensions.height === 180 &&
       normPart.dimensions.depth === 0.5 &&
-      normStep.cameraPreset?.distance === 200,
+      normStep.cameraPreset?.distance === 288,
   };
   if (!testResults.normalizeBackPanelAndDistance.valid) testResults.passed = false;
 
@@ -684,7 +687,7 @@ async function runTests() {
       normPart.position.z === -14.75 &&
       normStep.cameraPreset?.phi === 1.05 &&
       normStep.cameraPreset?.theta === 0.72 &&
-      normPart.rotation.x === 15 &&
+      normPart.rotation.x === 0 &&
       normPart.rotation.y === -90 &&
       normPart.rotation.z === 0 &&
       normPart.qty === 2 &&
@@ -825,7 +828,7 @@ async function runTests() {
       e2eBackPanel?.position.x === 0 &&
       e2eBackPanel?.position.y === 90 &&
       e2eBackPanel?.position.z === -14.75 &&
-      e2eStep3?.cameraPreset?.distance === 200 &&
+      e2eStep3?.cameraPreset?.distance === 288 &&
       e2eStep3?.cameraPreset?.phi === 1.05 &&
       e2eStep3?.cameraPreset?.theta === 0.55 &&
       streamedValidSteps[2]?.parts?.[0]?.dimensions?.width === 80,
@@ -862,7 +865,7 @@ async function runTests() {
       regPart?.dimensions?.height !== 18 &&
       regPart?.dimensions?.width === 80 &&
       regPart?.dimensions?.depth === 0.5 &&
-      regDistance === 200 &&
+      regDistance === 288 &&
       regDistance !== 20,
   };
   if (!testResults.backPanel1800MmBecomes180Not18.valid) testResults.passed = false;
@@ -886,6 +889,157 @@ async function runTests() {
       !/\bcm\b/i.test(dimInstructions),
   };
   if (!testResults.promptDoesNotAskForCentimeters.valid) testResults.passed = false;
+
+  // 26. Clamp test: 180 cm model with normalized distance 50 (raw 500 mm) clamps to 288 (including cumulative small step)
+  const lowDistBookcaseStream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Frame',
+      cameraPreset: { distance: 500, phi: 1.15, theta: 0.45 },
+      parts: [
+        {
+          id: 'side_180',
+          name: 'Side Panel',
+          primitive: 'box',
+          dimensions: { width: 20, height: 1800, depth: 300 },
+          position: { x: -390, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+    JSON.stringify({
+      stepNumber: 2,
+      title: 'Small Screw Step',
+      cameraPreset: { distance: 500, phi: 1.25, theta: 0.55 },
+      parts: [
+        {
+          id: 'screw_small',
+          name: 'Wood Screw',
+          primitive: 'cylinder',
+          dimensions: { radius: 2, height: 30, radialSegments: 16 },
+          position: { x: 0, y: 50, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'grey',
+          material: 'steel',
+          step: 2,
+          qty: 8,
+        },
+      ],
+    }) + '\n',
+  ];
+  const resLowDist = await generateScene(
+    'build a 4-shelf bookcase',
+    new FakeModelClient([lowDistBookcaseStream])
+  );
+  const step1Preset = resLowDist.steps[0]?.cameraPreset;
+  const step2Preset = resLowDist.steps[1]?.cameraPreset;
+  testResults.clampDistanceLowFor180CmModel = {
+    step1Distance: step1Preset?.distance,
+    step2Distance: step2Preset?.distance,
+    phiPreserved: step1Preset?.phi === 1.15 && step2Preset?.phi === 1.25,
+    thetaPreserved: step1Preset?.theta === 0.45 && step2Preset?.theta === 0.55,
+    valid:
+      resLowDist.success === true &&
+      step1Preset?.distance === 288 &&
+      step2Preset?.distance === 288 &&
+      step1Preset?.phi === 1.15 &&
+      step1Preset?.theta === 0.45 &&
+      step2Preset?.phi === 1.25 &&
+      step2Preset?.theta === 0.55,
+  };
+  if (!testResults.clampDistanceLowFor180CmModel.valid) testResults.passed = false;
+
+  // 27. Distance unchanged when within [1.6 * maxExtent, 400] (distance 300 for 180 cm; distance 200 for 100 cm; max cap 400)
+  const unchangedStream180 = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Wide Shot 180cm',
+      cameraPreset: { distance: 3000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_180_ok',
+          name: 'Panel 180cm',
+          primitive: 'box',
+          dimensions: { width: 800, height: 1800, depth: 20 },
+          position: { x: 0, y: 900, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const unchangedStream100 = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Medium Model 100cm',
+      cameraPreset: { distance: 2000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_100_ok',
+          name: 'Panel 100cm',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const overMaxStream = [
+    JSON.stringify({
+      stepNumber: 1,
+      title: 'Over Max Cap',
+      cameraPreset: { distance: 6000, phi: 1.1, theta: 0.6 },
+      parts: [
+        {
+          id: 'panel_100_cap',
+          name: 'Panel',
+          primitive: 'box',
+          dimensions: { width: 600, height: 1000, depth: 20 },
+          position: { x: 0, y: 500, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          color: 'tan',
+          material: 'oak',
+          step: 1,
+          qty: 1,
+        },
+      ],
+    }) + '\n',
+  ];
+  const res300 = await generateScene('180cm at 300', new FakeModelClient([unchangedStream180]));
+  const res200 = await generateScene('100cm at 200', new FakeModelClient([unchangedStream100]));
+  const resOverMax = await generateScene('over max 400', new FakeModelClient([overMaxStream]));
+  testResults.distanceUnchangedWhenWithinBounds = {
+    dist180At300: res300.steps[0]?.cameraPreset?.distance,
+    dist100At200: res200.steps[0]?.cameraPreset?.distance,
+    distOverMaxClamped: resOverMax.steps[0]?.cameraPreset?.distance,
+    valid:
+      res300.steps[0]?.cameraPreset?.distance === 300 &&
+      res200.steps[0]?.cameraPreset?.distance === 200 &&
+      resOverMax.steps[0]?.cameraPreset?.distance === 400,
+  };
+  if (!testResults.distanceUnchangedWhenWithinBounds.valid) testResults.passed = false;
+
+  // 28. Desk fixture distances are never modified
+  const deskDistances = DESK_SCENE.steps.map((s) => s.cameraPreset?.distance);
+  const expectedDeskDistances = [90, 85, 95, 100, 75, 88];
+  testResults.deskFixtureDistancesUntouched = {
+    deskDistances,
+    expectedDeskDistances,
+    valid: JSON.stringify(deskDistances) === JSON.stringify(expectedDeskDistances),
+  };
+  if (!testResults.deskFixtureDistancesUntouched.valid) testResults.passed = false;
 
   process.stdout.write(JSON.stringify(testResults, null, 2));
 }

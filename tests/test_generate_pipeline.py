@@ -164,7 +164,7 @@ class GeneratePipelineTests(unittest.TestCase):
         res = self.data["normalizeBackPanelAndDistance"]
         self.assertEqual(res["factor"], 10)
         self.assertEqual(res["dimensions"], {"width": 80, "height": 180, "depth": 0.5})
-        self.assertEqual(res["distance"], 200)
+        self.assertEqual(res["distance"], 288)
         self.assertTrue(res["valid"])
 
     def test_position_and_dimensions_scale_together_preserving_angles_and_qty(self):
@@ -182,7 +182,7 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertEqual(res["stepCount"], 3)
         self.assertEqual(res["boxMaxCm"], 500)
         self.assertEqual(res["step3Dimensions"], {"width": 80, "height": 180, "depth": 0.5})
-        self.assertEqual(res["step3CameraPreset"]["distance"], 200)
+        self.assertEqual(res["step3CameraPreset"]["distance"], 288)
         self.assertTrue(res["valid"])
 
     def test_unit_labels_cm_for_generated_and_desk_kept(self):
@@ -198,7 +198,7 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertNotEqual(res["height"], 18)
         self.assertEqual(res["width"], 80)
         self.assertEqual(res["depth"], 0.5)
-        self.assertEqual(res["distance"], 200)
+        self.assertEqual(res["distance"], 288)
         self.assertTrue(res["valid"])
 
     def test_build_prompt_does_not_contain_centimeters_or_cm(self):
@@ -206,6 +206,26 @@ class GeneratePipelineTests(unittest.TestCase):
         self.assertTrue(res["hasDimensionBoundsHeader"])
         self.assertFalse(res["hasCentimetersWord"])
         self.assertFalse(res["hasCmToken"])
+        self.assertTrue(res["valid"])
+
+    def test_clamp_distance_low_for_180cm_model(self):
+        res = self.data["clampDistanceLowFor180CmModel"]
+        self.assertEqual(res["step1Distance"], 288)
+        self.assertEqual(res["step2Distance"], 288)
+        self.assertTrue(res["phiPreserved"])
+        self.assertTrue(res["thetaPreserved"])
+        self.assertTrue(res["valid"])
+
+    def test_distance_unchanged_within_bounds_and_capped_at_400(self):
+        res = self.data["distanceUnchangedWhenWithinBounds"]
+        self.assertEqual(res["dist180At300"], 300)
+        self.assertEqual(res["dist100At200"], 200)
+        self.assertEqual(res["distOverMaxClamped"], 400)
+        self.assertTrue(res["valid"])
+
+    def test_desk_fixture_distances_untouched(self):
+        res = self.data["deskFixtureDistancesUntouched"]
+        self.assertEqual(res["deskDistances"], res["expectedDeskDistances"])
         self.assertTrue(res["valid"])
 
 

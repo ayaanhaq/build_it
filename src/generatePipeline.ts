@@ -15,7 +15,7 @@ import {
 } from "./sceneValidator.ts";
 import {
   convertPrimitiveBoundsToViewerUnits,
-  normalizeSceneToViewerUnits,
+  normalizeStepToViewerUnits,
 } from "./sceneUnits.ts";
 import { REAL_TONES } from "./three-scene.ts";
 
@@ -469,12 +469,9 @@ export async function generateScene(
   const seenPartIds = new Set<string>();
 
   // Model input is in millimeters (matching the schema and prompt);
-  // divide once by MM_PER_VIEWER_UNIT (10) so validated and emitted steps are in viewer units (cm).
+  // divide once by MM_PER_VIEWER_UNIT (10) and clamp cameraPreset.distance using cumulative visible steps.
   const normalizeParsedStep = (rawStep: SceneStep): SceneStep =>
-    normalizeSceneToViewerUnits({
-      schemaVersion: 1,
-      steps: [rawStep],
-    }).steps[0];
+    normalizeStepToViewerUnits(rawStep, validSteps);
 
   const initialPrompt = buildPrompt(request, schema, primitiveTable, paletteNames);
   const stream = client.generateStream(initialPrompt);
